@@ -161,7 +161,7 @@ export function pad(
   wonkyStroke(ctx, path, strokeWeight(width, true), strokeOffset);
 }
 
-export type IconKind = "bomb" | "can" | "tower" | "ball";
+export type IconKind = "bomb" | "can" | "tower" | "cymbals";
 
 // Which icon represents each round — used by the attract screen's logo
 // lockup and the transition routine's icon card (epic sections 6.1 and 8).
@@ -171,7 +171,10 @@ export const ROUND_ICON: Record<RoundId, IconKind> = {
   ohno: "bomb",
   shake: "can",
   climber: "tower",
-  rhythm: "ball",
+  // "ball" belonged to v1's beat-matching game, where a ball bounced
+  // along a beat grid. That game is deleted; round id "rhythm" is a pair
+  // of cymbals now, which is what the game master actually holds.
+  rhythm: "cymbals",
 };
 
 export function icon(
@@ -221,8 +224,14 @@ export function icon(
       path.lineTo(size * 0.15, -size * 0.2);
       path.closePath();
       break;
-    case "ball":
-      path.arc(0, 0, size * 0.35, 0, Math.PI * 2);
+    case "cymbals":
+      // Two overlapping discs seen edge-on-ish, each with a centre boss —
+      // reads as a crash at card size where a single circle reads as a dot.
+      for (const side of [-1, 1]) {
+        path.ellipse(side * size * 0.16, 0, size * 0.24, size * 0.36, (side * 18 * Math.PI) / 180, 0, Math.PI * 2);
+        path.moveTo(side * size * 0.16 + size * 0.07, 0);
+        path.arc(side * size * 0.16, 0, size * 0.07, 0, Math.PI * 2);
+      }
       break;
   }
 

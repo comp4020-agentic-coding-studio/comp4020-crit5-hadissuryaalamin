@@ -12,7 +12,7 @@ const LOCKUP_ICONS: { kind: IconKind; color: string }[] = [
   { kind: "bomb", color: PALETTES.ohno.primary },
   { kind: "can", color: PALETTES.shake.primary },
   { kind: "tower", color: PALETTES.climber.primary },
-  { kind: "ball", color: PALETTES.rhythm.primary },
+  { kind: "cymbals", color: PALETTES.rhythm.primary },
 ];
 
 export interface AttractState {

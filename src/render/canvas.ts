@@ -23,7 +23,17 @@ export const PALETTES: Record<PaletteId, Palette> = {
   ohno: { bg: "#8A7563", primary: "#FF2D1F", accent: "#FFD400", pop: "#FF7BD5" },
   shake: { bg: "#00A9A5", primary: "#FF7A00", accent: "#FFF06A", pop: "#E8175D" },
   climber: { bg: "#FFE119", primary: "#2B7FFF", accent: "#FF4FA3", pop: "#00C2A8" },
-  rhythm: { bg: "#2B0F45", primary: "#FF2FB9", accent: "#43F5C4", pop: "#FFC803" },
+  // Same lesson as ohno above, and it bit harder here. v1's rhythm bg was a
+  // near-black plum #2B0F45, which had no cast standing in it: measured
+  // against INK it gives a contrast ratio of about 1.1, so the rig's outlines
+  // simply vanish and four ink-outlined figures read as four holes. Lifted to
+  // a dusty mid plum at roughly 4.4:1 against ink — the same working range
+  // ohno landed on — and deliberately DESATURATED, because unlike every other
+  // round this one has to let all four saturated pad colours flash against it
+  // in turn. A saturated ground would swallow whichever pad sat next to it on
+  // the colour wheel, and the pattern would stop being readable on the one
+  // hit that mattered.
+  rhythm: { bg: "#9C6B8C", primary: "#FFC803", accent: "#43F5C4", pop: "#3B1E4D" },
   dead: { bg: "#14100E", primary: "#FFF6E5", accent: "#FFF6E5", pop: "#FFF6E5" },
 };
 

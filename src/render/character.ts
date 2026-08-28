@@ -62,6 +62,85 @@ export interface CharacterSpec {
   // Extra body-height multiplier for taller variants (e.g. the kangaroo game
   // master, epic 8.2) without changing the head-ratio rule. 1 = standard.
   bodyStretch?: number;
+
+  // ---- the kangaroo variant (epic 8.2) --------------------------------
+  // Same rig, different numbers — every field below defaults to the racers'
+  // own value, so a spec that omits them draws exactly the figure the three
+  // shipped scenes already draw. Nothing here is kangaroo-specific in the
+  // code; it is all "how long", "what colour", "how high".
+
+  // Ear length as a multiple of head height. 0 (the default) is no ears.
+  ears?: number;
+  // Tail length as a multiple of body height. 0 (the default) is no tail.
+  tail?: number;
+  // Which way the tail sweeps: +1 to the character's right, -1 to the left.
+  tailSide?: number;
+  // A marching-band tunic painted over the top of the body in this colour,
+  // with `tunicTrim` for its collar and buttons. Undefined is no tunic.
+  // Follow the Rhythm repaints this every frame, which is how the game
+  // master wears the colour it is sounding.
+  tunic?: string;
+  tunicTrim?: string;
+
+  // Arms. 0/0 is the rig's own resting pose, unchanged; lift raises the hands
+  // from hanging to overhead, reach swings them out wide (+) or in across the
+  // chest (-). A cymbal crash is one sweep of both at once.
+  armLift?: number;
+  armReach?: number;
+}
+
+// Where the character's hands end up, in STAGE coordinates, with the pose's
+// squash/stretch and the rig's seeded rotation already applied. Exported so a
+// scene can hang a prop off the hands (the game master's cymbals) without
+// re-deriving — or worse, guessing — the rig's own limb geometry.
+export function handPositions(
+  stage: Stage,
+  spec: CharacterSpec,
+): { left: { x: number; y: number }; right: { x: number; y: number }; radius: number } {
+  const u = stage.u;
+  const pose = spec.pose ?? neutralPose();
+  const h = spec.heightU * u;
+  const headH = h * 0.4;
+  const bodyH = (h - headH) * (spec.bodyStretch ?? 1);
+  const rot = (keyedRange(spec.seed, "char-rot", 3) * Math.PI) / 180;
+  const cos = Math.cos(rot);
+  const sin = Math.sin(rot);
+
+  // drawCharacter composes translate -> scale -> rotate, so a local point is
+  // rotated first, then scaled, then translated. Mirror that exactly.
+  const toStage = (p: { x: number; y: number }): { x: number; y: number } => ({
+    x: spec.cx + (p.x * cos - p.y * sin) * pose.scaleX,
+    y: spec.feetY + (p.x * sin + p.y * cos) * pose.scaleY,
+  });
+
+  return {
+    left: toStage(armGeometry(spec, bodyH, -1).to),
+    right: toStage(armGeometry(spec, bodyH, 1).to),
+    radius: 2.2 * u,
+  };
+}
+
+function armGeometry(
+  spec: CharacterSpec,
+  bodyH: number,
+  side: number,
+): { from: { x: number; y: number }; to: { x: number; y: number } } {
+  const topW = bodyH * 0.62;
+  const shoulderY = -bodyH + bodyH * 0.15;
+  const armLen = bodyH * 0.55;
+  const lift = spec.armLift ?? 0;
+  const reach = spec.armReach ?? 0;
+
+  const from = { x: (side * topW) / 2 / 0.9, y: shoulderY };
+  const restY = shoulderY + armLen * 0.8;
+  const overheadY = shoulderY - armLen * 0.5;
+  return {
+    from,
+    to: {
+      x: from.x + side * armLen * (0.6 + reach * 0.5),
+      y: restY + lift * (overheadY - restY),
+    },
+  };
 }
 
 export function drawCharacter(stage: Stage, spec: CharacterSpec): void {
@@ -85,11 +164,92 @@ export function drawCharacter(stage: Stage, spec: CharacterSpec): void {
   ctx.scale(pose.scaleX, pose.scaleY);
   ctx.rotate((bodyRotation * Math.PI) / 180);
 
+  // The tail sits behind everything, so the body overlaps its root.
+  if (spec.tail) drawTail(ctx, u, spec, bodyH, strokeOff);
   drawLimbs(ctx, u, spec, bodyH, strokeOff);
   drawBody(ctx, u, spec, bodyH, strokeOff);
+  if (spec.tunic) drawTunic(ctx, u, spec, bodyH, strokeOff);
   drawHead(ctx, u, spec, headH, bodyH, gaze, strokeOff);
 
   ctx.restore();
+}
+
+// A thick tapered shape rather than a stroked line: canvas cannot taper a
+// stroke, and an untapered one reads as a piece of rope rather than a tail.
+function drawTail(
+  ctx: CanvasRenderingContext2D,
+  u: number,
+  spec: CharacterSpec,
+  bodyH: number,
+  strokeOff: { dx: number; dy: number },
+): void {
+  const side = spec.tailSide ?? 1;
+  const length = (spec.tail ?? 0) * bodyH;
+  const rootX = side * bodyH * 0.2;
+  const rootY = -bodyH * 0.28;
+  const rootW = bodyH * 0.24;
+  const tipX = rootX + side * length;
+  const tipY = -bodyH * 0.02;
+  const ctrlX = rootX + side * length * 0.55;
+  const ctrlY = rootY - bodyH * 0.42;
+
+  const path = new Path2D();
+  path.moveTo(rootX, rootY - rootW / 2);
+  path.quadraticCurveTo(ctrlX, ctrlY - rootW * 0.2, tipX, tipY);
+  path.quadraticCurveTo(ctrlX, ctrlY + rootW * 0.8, rootX, rootY + rootW / 2);
+  path.closePath();
+
+  hardShadow(ctx, path, 0.9 * u, 1.1 * u);
+  ctx.fillStyle = spec.color;
+  ctx.fill(path);
+  wonkyStroke(ctx, path, strokeWeight(u, false), strokeOff);
+}
+
+// The marching-band tunic (epic 8.2). Clipped to the body so it can never
+// spill past the silhouette, then the body outline is restated on top so the
+// figure keeps its ink edge.
+function drawTunic(
+  ctx: CanvasRenderingContext2D,
+  u: number,
+  spec: CharacterSpec,
+  bodyH: number,
+  strokeOff: { dx: number; dy: number },
+): void {
+  const path = bodyPath(bodyH);
+  const topW = bodyH * 0.62;
+  const top = -bodyH;
+  const hem = -bodyH * 0.42;
+
+  ctx.save();
+  ctx.clip(path);
+  ctx.fillStyle = spec.tunic as string;
+  ctx.fillRect(-topW, top - bodyH * 0.1, topW * 2, top * -1 + hem);
+  ctx.restore();
+
+  const trim = spec.tunicTrim ?? "#FFF6E5";
+  const detail = new Path2D();
+  // Collar, hem line, and two columns of buttons down the front.
+  detail.moveTo(-topW * 0.34, top + bodyH * 0.1);
+  detail.lineTo(0, top + bodyH * 0.22);
+  detail.lineTo(topW * 0.34, top + bodyH * 0.1);
+  detail.moveTo(-topW * 0.45, hem);
+  detail.lineTo(topW * 0.45, hem);
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
+  ctx.lineWidth = Math.max(2, 0.5 * u);
+  ctx.strokeStyle = trim;
+  ctx.stroke(detail);
+
+  for (let row = 0; row < 3; row++) {
+    for (const side of [-1, 1]) {
+      const button = new Path2D();
+      button.arc(side * topW * 0.16, top + bodyH * 0.3 + row * bodyH * 0.12, Math.max(1.5, 0.34 * u), 0, Math.PI * 2);
+      ctx.fillStyle = trim;
+      ctx.fill(button);
+    }
+  }
+
+  wonkyStroke(ctx, path, strokeWeight(u, true), strokeOff);
 }
 
 function bodyPath(bodyH: number): Path2D {
@@ -155,18 +315,13 @@ function drawLimbs(
   bodyH: number,
   strokeOff: { dx: number; dy: number },
 ): void {
-  const topW = bodyH * 0.62;
   const botW = bodyH * 0.5;
-  const top = -bodyH;
   const bottomBody = -bodyH * 0.15;
-  const shoulderY = top + bodyH * 0.15;
-  const armLen = bodyH * 0.55;
   const limbWeight = strokeWeight(u, false);
   const blobR = 2.2 * u;
 
   for (const side of [-1, 1]) {
-    const from = { x: (side * topW) / 2 / 0.9, y: shoulderY };
-    const to = { x: from.x + side * armLen * 0.6, y: shoulderY + armLen * 0.8 };
+    const { from, to } = armGeometry(spec, bodyH, side);
     drawLimbSegment(ctx, from, to, limbWeight, blobR, spec.color, strokeOff);
   }
 
@@ -189,6 +344,28 @@ function drawHead(
   const cy = -bodyH - headH / 2;
   const rx = headH * 0.52;
   const ry = headH * 0.46;
+
+  // Ears go on before the head, so the head overlaps their base and they read
+  // as attached rather than balanced on top.
+  if (spec.ears) {
+    const earLen = spec.ears * headH;
+    for (const side of [-1, 1]) {
+      const ear = new Path2D();
+      ear.ellipse(
+        side * rx * 0.42,
+        cy - ry * 0.62 - earLen * 0.42,
+        earLen * 0.2,
+        earLen * 0.55,
+        (side * 16 * Math.PI) / 180,
+        0,
+        Math.PI * 2,
+      );
+      hardShadow(ctx, ear, 0.9 * u, 1.1 * u);
+      ctx.fillStyle = spec.color;
+      ctx.fill(ear);
+      wonkyStroke(ctx, ear, strokeWeight(u * 0.7, false), strokeOff);
+    }
+  }
 
   const path = new Path2D();
   path.ellipse(0, cy, rx, ry, 0, 0, Math.PI * 2);

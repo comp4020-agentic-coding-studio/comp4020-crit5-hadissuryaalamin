@@ -259,48 +259,36 @@ export function playSlip(synth: Synth): void {
   osc.stop(now + durationSec);
 }
 
-// Epic section 10: sine 120 -> 50 Hz, 80ms. Fires on every beat landing in
-// Follow the Rhythm - lead-in or judged, hit or miss - it's the game's
-// pulse, not a judgement, and partners the visible beat-flash so muted play
-// still has a felt rhythm via the ball's arc alone.
-export function playRhythmBeat(synth: Synth): void {
+// Follow the Rhythm's four pad pitches (epic v2 section 7.4): pads are
+// pitched LOW to HIGH, LEFT to RIGHT, so the pattern is carried by pitch
+// order as well as by colour. C E G C, a stack anyone can hear the shape of.
+// The three v1 sounds that used to live here (a beat pulse, a hit and a
+// mistimed thud) went with the beat-matching game they judged; this round
+// judges which pad, never when, so it has nothing to sound a miss against.
+const PAD_PITCHES: Record<0 | 1 | 2 | 3, number> = {
+  0: 262,
+  1: 330,
+  2: 392,
+  3: 523,
+};
+
+// Square 180ms with a fast decay. `strong` is the game master sounding the
+// pattern; a racer echoing it back is quieter, so three racers hammering pads
+// never drown out the call they are answering.
+export function playPadTone(synth: Synth, padIndex: 0 | 1 | 2 | 3, strong = false): void {
   if (!synth.ctx || !synth.master) return;
   const ctx = synth.ctx;
   const master = synth.master;
   const now = ctx.currentTime;
-  const durationSec = 0.08;
-
-  const osc = ctx.createOscillator();
-  osc.type = "sine";
-  osc.frequency.setValueAtTime(120, now);
-  osc.frequency.exponentialRampToValueAtTime(50, now + durationSec);
-
-  const gain = ctx.createGain();
-  gain.gain.setValueAtTime(0.2, now);
-  gain.gain.linearRampToValueAtTime(0.0001, now + durationSec);
-
-  osc.connect(gain);
-  gain.connect(master);
-  osc.start(now);
-  osc.stop(now + durationSec);
-}
-
-// Epic section 10: square 660 Hz, 60ms. Fires on a Rhythm tap that lands
-// inside the hit window.
-export function playRhythmHit(synth: Synth): void {
-  if (!synth.ctx || !synth.master) return;
-  const ctx = synth.ctx;
-  const master = synth.master;
-  const now = ctx.currentTime;
-  const durationSec = 0.06;
+  const durationSec = strong ? 0.26 : 0.16;
 
   const osc = ctx.createOscillator();
   osc.type = "square";
-  osc.frequency.value = 660;
+  osc.frequency.value = PAD_PITCHES[padIndex];
 
   const gain = ctx.createGain();
-  gain.gain.setValueAtTime(0.2, now);
-  gain.gain.linearRampToValueAtTime(0.0001, now + durationSec);
+  gain.gain.setValueAtTime(strong ? 0.22 : 0.13, now);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + durationSec);
 
   osc.connect(gain);
   gain.connect(master);
@@ -308,27 +296,28 @@ export function playRhythmHit(synth: Synth): void {
   osc.stop(now + durationSec);
 }
 
-// Epic section 10: white noise 80ms, lowpass 300 Hz. Fires on a mistimed
-// Rhythm tap - the epic requires this to read as unmistakably different
-// from a hit within two beats.
-export function playRhythmThud(synth: Synth): void {
+// The game master's cymbals: highpassed white noise, 380ms, fast in and slow
+// out. Fires alongside playPadTone on every hit of the pattern, so the call
+// has a percussive front the echoes do not.
+export function playCymbalCrash(synth: Synth): void {
   if (!synth.ctx || !synth.master) return;
   const ctx = synth.ctx;
   const master = synth.master;
   const now = ctx.currentTime;
-  const durationSec = 0.08;
+  const durationSec = 0.38;
 
   const buffer = noiseBuffer(ctx, durationSec);
   const source = ctx.createBufferSource();
   source.buffer = buffer;
 
   const filter = ctx.createBiquadFilter();
-  filter.type = "lowpass";
-  filter.frequency.value = 300;
+  filter.type = "highpass";
+  filter.frequency.value = 4200;
 
   const gain = ctx.createGain();
-  gain.gain.setValueAtTime(0.2, now);
-  gain.gain.linearRampToValueAtTime(0.0001, now + durationSec);
+  gain.gain.setValueAtTime(0.0001, now);
+  gain.gain.linearRampToValueAtTime(0.18, now + 0.008);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + durationSec);
 
   source.connect(filter);
   filter.connect(gain);

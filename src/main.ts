@@ -17,6 +17,8 @@ import {
   playCanJolt,
   playCanLaunch,
   playClimbStep,
+  playCymbalCrash,
+  playPadTone,
   playSlip,
   playTapBlip,
   playWinChord,
@@ -41,7 +43,16 @@ import {
   wrongPad,
   type ClimberState,
 } from "./game/climber.ts";
-import { BOMB_LAPS, CAN_LAPS, CLIMBER_LAPS } from "./game/laps.ts";
+import {
+  createPattern,
+  expectedPad,
+  resolvePatternPlacing,
+  tapPattern,
+  tickPattern,
+  wrongPatternPad,
+  type PatternState,
+} from "./game/pattern.ts";
+import { BOMB_LAPS, CAN_LAPS, CLIMBER_LAPS, PATTERN_LAPS } from "./game/laps.ts";
 import { mulberry32, type Rng } from "./game/rng.ts";
 import type { Place, Placing } from "./game/types.ts";
 import { drawAttract, type AttractState } from "./render/scenes/attract.ts";
@@ -51,6 +62,7 @@ import { drawPodium, PODIUM_DURATION_MS } from "./render/scenes/podium.ts";
 import { drawCan } from "./render/scenes/can.ts";
 import { climberGlowPulse, drawClimber } from "./render/scenes/climber.ts";
 import { bombPassPulse, drawBomb, EXPLOSION_HOLD_MS } from "./render/scenes/bomb.ts";
+import { drawPattern, PATTERN_RESOLVE_HOLD_MS } from "./render/scenes/pattern.ts";
 import {
   createPadPressState,
   drawFourPads,
@@ -63,12 +75,12 @@ import { drawCharacter, neutralPose, squashPose } from "./render/character.ts";
 
 // v2 rebuild step 2 (epic build-order) wired the gauntlet's phase machine to
 // resolve every round to a 3-racer placing via a podium screen, instead of a
-// solo cleared/lost status. Steps 3, 4 and 5 (Shake, Climber, and this file's
-// Oh No wiring) each replace the THROWAWAY "first to N pad taps wins" race
-// with a real microgame — but only for their own round id. Rhythm is rebuilt
-// in task 016 and still runs on the throwaway round in the meantime; the code
-// paths below are branched on currentRound(gauntlet) so real and
-// not-yet-rebuilt rounds can coexist.
+// solo cleared/lost status. Steps 3 to 6 then replaced the THROWAWAY "first to
+// N pad taps wins" race with a real microgame, one round id at a time. With
+// this file's Follow the Rhythm wiring ALL FOUR rounds are now the real
+// mechanic and nothing reaches the throwaway path any more. It is kept, and
+// kept last in the branch, purely as the fallback for a round id that somehow
+// has no scene of its own - a blank screen would be the worse failure.
 
 const THROWAWAY_TARGET_TAPS = 15;
 const THROWAWAY_TIMEOUT_MS = 20_000;
@@ -145,6 +157,23 @@ let bombCpuTimers: [CpuTimerState, CpuTimerState] = [
   createCpuTimer(CPU_LAPS[1], mulberry32(13)),
 ];
 
+// Follow the Rhythm state - reset in enterCurrentRound(). `patternRng` is the
+// rule module's own stream (it deals every pattern), and `patternCpuRng` is
+// kept separate so a rival's error rolls can never shift the pattern the human
+// is reading - the same separation Climber needs, for the same reason.
+// `patternLitAtMs` is how the render loop notices a NEW hit from the game
+// master, since the rule exposes a hit as a stamp rather than as an event.
+let patternState: PatternState = createPattern(PATTERN_LAPS[1], mulberry32(14));
+let patternRng: Rng = mulberry32(15);
+let patternCpuRng: Rng = mulberry32(16);
+let patternSeed = 0;
+let patternResolveMs = 0;
+let patternLitAtMs: number | null = null;
+let patternCpuTimers: [CpuTimerState, CpuTimerState] = [
+  createCpuTimer(CPU_LAPS[1], mulberry32(17)),
+  createCpuTimer(CPU_LAPS[1], mulberry32(18)),
+];
+
 function syncMuteButton(): void {
   muteButton.setAttribute("aria-pressed", String(synth.muted));
 }
@@ -204,6 +233,17 @@ function enterCurrentRound(): void {
   bombCpuTimers = [
     createCpuTimer(CPU_LAPS[gauntlet.lap], mulberry32(bombSeed ^ 0x846ca68b)),
     createCpuTimer(CPU_LAPS[gauntlet.lap], mulberry32(bombSeed ^ 0xc2b2ae35)),
+  ];
+
+  patternSeed = Math.floor(Math.random() * 0xffffffff);
+  patternRng = mulberry32(patternSeed);
+  patternState = createPattern(PATTERN_LAPS[gauntlet.lap], patternRng);
+  patternCpuRng = mulberry32(patternSeed ^ 0x5bd1e995);
+  patternResolveMs = 0;
+  patternLitAtMs = null;
+  patternCpuTimers = [
+    createCpuTimer(CPU_LAPS[gauntlet.lap], mulberry32(patternSeed ^ 0xcc9e2d51)),
+    createCpuTimer(CPU_LAPS[gauntlet.lap], mulberry32(patternSeed ^ 0x1b873593)),
   ];
 }
 
@@ -269,6 +309,19 @@ function handlePad(padIndex: 0 | 1 | 2 | 3): void {
     if (bombState.holder !== 0 || bombState.racers[0].stunRemaining > 0) return;
     bombState = tapBomb(bombState, 0, padIndex, BOMB_LAPS[gauntlet.lap]);
     if (padIndex === PASS_PAD) playTapBlip(synth);
+    else playSlip(synth);
+    return;
+  }
+
+  if (currentRound(gauntlet) === "rhythm") {
+    if (patternState.status !== "playing") return;
+    // A pad hit while the game master is still sounding the pattern is inert
+    // AND silent: waiting is part of the rule, and being answered with nothing
+    // is how that gets learned. It is never an elimination.
+    const owed = expectedPad(patternState, 0);
+    if (owed === null) return;
+    patternState = tapPattern(patternState, 0, padIndex);
+    if (padIndex === owed) playPadTone(synth, padIndex);
     else playSlip(synth);
     return;
   }
@@ -434,6 +487,50 @@ function frame(now: number): void {
         podiumElapsedMs = 0;
       }
     }
+  } else if (gauntlet.phase === "round" && currentRound(gauntlet) === "rhythm") {
+    const config = PATTERN_LAPS[gauntlet.lap];
+    const cpuConfig = CPU_LAPS[gauntlet.lap];
+
+    // Only a racer who still owes hits has a decision to make, so only their
+    // reaction clock runs - the same shape Oh No uses for whoever is holding
+    // the bomb. A rival's clock starts when the cymbals come down and stops
+    // the moment they finish echoing.
+    for (const racerId of [1, 2] as const) {
+      const owed = expectedPad(patternState, racerId);
+      if (owed === null) continue;
+      const tick = tickCpuTimer(patternCpuTimers[racerId - 1], cpuConfig, dtMs, patternCpuRng);
+      patternCpuTimers[racerId - 1] = tick.timer;
+      if (!tick.acted) continue;
+      // A rival's mistake here reads as reaching for the wrong pad, and costs
+      // them exactly what it costs a human: the round.
+      const padIndex = tick.errored ? wrongPatternPad(patternState, racerId, patternCpuRng) : owed;
+      patternState = tapPattern(patternState, racerId, padIndex);
+    }
+
+    patternState = tickPattern(patternState, config, dt, patternRng);
+
+    // The game master's hits arrive as a stamp, not an event, so a new hit is
+    // a changed stamp. Crash plus that pad's own pitch, low to high and left
+    // to right - the audio half of a readout that has to work without it.
+    if (patternState.litPad !== null && patternState.litSinceMs !== patternLitAtMs) {
+      patternLitAtMs = patternState.litSinceMs;
+      playCymbalCrash(synth);
+      playPadTone(synth, patternState.litPad, true);
+    }
+
+    // Checked AFTER the tick, never against a pre-tick snapshot: this round
+    // resolves inside tapPattern (the second elimination), including from a
+    // human tap landing between frames. The scene is then held for
+    // PATTERN_RESOLVE_HOLD_MS so the final slump is actually seen - without
+    // the hold the podium takes over on the same tick and the elimination
+    // rule loses its only teacher.
+    if (patternState.status === "resolved") {
+      patternResolveMs += dtMs;
+      if (patternResolveMs >= PATTERN_RESOLVE_HOLD_MS) {
+        gauntlet = roundResolved(gauntlet, resolvePatternPlacing(patternState));
+        podiumElapsedMs = 0;
+      }
+    }
   } else if (gauntlet.phase === "round") {
     throwawayElapsedMs += dtMs;
     const cpuConfig = CPU_LAPS[gauntlet.lap];
@@ -509,6 +606,18 @@ function frame(now: number): void {
         ? { index: PASS_PAD, pulse: bombPassPulse(bombState.elapsedMs) }
         : null;
     drawFourPads(stage, padPressState, passGlow);
+  } else if (gauntlet.phase === "round" && currentRound(gauntlet) === "rhythm") {
+    drawPattern(stage, patternState, PATTERN_LAPS[gauntlet.lap], gauntlet.racers, patternSeed, patternResolveMs);
+    // The pad band lights ONLY while the game master is sounding the pattern,
+    // and goes plain the moment it is the racers' turn. That is the honest
+    // half of the affordance: highlighting the pad a player owes would hand
+    // them the answer, so the pads teach the colour-to-pad mapping during the
+    // call and say nothing whatever during the response.
+    const demoGlow: PadGlow | null =
+      patternState.status === "playing" && patternState.litPad !== null
+        ? { index: patternState.litPad, pulse: 1.06 }
+        : null;
+    drawFourPads(stage, padPressState, demoGlow);
   } else if (gauntlet.phase === "round") {
     drawThrowawayRound();
   } else if (gauntlet.phase === "podium" && gauntlet.lastPlacing) {

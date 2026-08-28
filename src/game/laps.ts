@@ -1,7 +1,7 @@
 import type { BombConfig } from "./bomb.ts";
 import type { CanConfig } from "./can.ts";
 import type { ClimberConfig } from "./climber.ts";
-import type { RhythmConfig } from "./rhythm.ts";
+import type { PatternConfig } from "./pattern.ts";
 
 export const LAP_COUNT = 3;
 
@@ -77,10 +77,70 @@ export const CLIMBER_LAPS: Record<Lap, ClimberConfig> = {
   3: { floors: 32, timerSeconds: 15.0, stunSeconds: 0.35, slipFloors: 1, doubleChance: 0.3 },
 };
 
-// Epic section 11.4. Rhythm is the last round of a lap, so clearing it on
-// lap 3 is what wins the run (handled generically by gauntlet.roundCleared).
-export const RHYTHM_LAPS: Record<Lap, RhythmConfig> = {
-  1: { bpm: 100, beats: 16, leadInBeats: 4, hitWindowMs: 150, maxMisses: 5 },
-  2: { bpm: 120, beats: 20, leadInBeats: 2, hitWindowMs: 110, maxMisses: 4 },
-  3: { bpm: 140, beats: 24, leadInBeats: 2, hitWindowMs: 80, maxMisses: 3 },
+// Follow the Rhythm (epic v2 section 7.4, CONFIRMED last-one-standing). The
+// v1 table is void along with the beat-matching game it belonged to: bpm,
+// hit windows and miss counts all described a rule that no longer exists.
+// These are DERIVED starting numbers, not tuned ones — task 019 owns tuning.
+//
+// How they were derived.
+//
+// startLength is the real difficulty dial, and it is set against the rivals'
+// per-hit error rate in src/game/cpu.ts (0.18 / 0.12 / 0.08). A rival echoes
+// a pattern of length n clean with probability (1 - e)^n, so at these lengths
+// a single rival survives one pattern about 55% / 60% / 66% of the time and
+// the round typically resolves in two to four patterns. Starting at 3 rather
+// than 1 means the first pattern a stranger sees already has enough shape to
+// read as a pattern; the growth rules then take it up fast enough that a
+// human failure lands around length 6 or 7 on lap 1.
+//
+// Growth is +1 per pattern echoed clean and another +1 whenever a racer
+// drops, both per epic 7.4. Those stack, so the pattern after the first
+// elimination jumps by 2 — the "rising pressure on whoever is left" the rule
+// asks for, and the reason maxLength exists at all.
+//
+// The demo timings ramp with the lap so the round gets faster as well as
+// longer. demoLitSeconds is always comfortably under demoHitSeconds: that gap
+// is the dark frame between two hits, and it is the only thing that makes the
+// same pad twice in a row readable with the sound off. Shrinking it is the
+// fastest way to break the muted-legibility requirement, so it shrinks more
+// slowly than the interval it sits inside.
+//
+// roundTimeoutSeconds is a safety valve, not a clock the player races. At
+// lap 1 a pattern costs about (n * 0.62 + 1.3)s of demo plus about n * 0.6s
+// of echo at a rival's reaction speed, so three patterns run to roughly 15s;
+// 30s is about double the expected round and only bites when someone stalls.
+export const PATTERN_LAPS: Record<Lap, PatternConfig> = {
+  1: {
+    startLength: 3,
+    lengthPerPattern: 1,
+    lengthPerElimination: 1,
+    maxLength: 10,
+    demoLeadSeconds: 0.7,
+    demoHitSeconds: 0.62,
+    demoLitSeconds: 0.34,
+    demoHoldSeconds: 0.6,
+    roundTimeoutSeconds: 30,
+  },
+  2: {
+    startLength: 4,
+    lengthPerPattern: 1,
+    lengthPerElimination: 1,
+    maxLength: 10,
+    demoLeadSeconds: 0.6,
+    demoHitSeconds: 0.52,
+    demoLitSeconds: 0.29,
+    demoHoldSeconds: 0.5,
+    roundTimeoutSeconds: 32,
+  },
+  3: {
+    startLength: 5,
+    lengthPerPattern: 1,
+    lengthPerElimination: 1,
+    maxLength: 10,
+    demoLeadSeconds: 0.5,
+    demoHitSeconds: 0.44,
+    demoLitSeconds: 0.25,
+    demoHoldSeconds: 0.42,
+    roundTimeoutSeconds: 34,
+  },
 };
