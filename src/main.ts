@@ -2,59 +2,34 @@ import { createStage, fillBackground, PALETTES, resizeStage } from "./render/can
 import {
   createGauntlet,
   currentRound,
+  podiumFinished,
   restartGauntlet,
-  roundCleared,
-  roundLost,
+  roundResolved,
   startGauntlet,
   transitionFinished,
   type GauntletState,
 } from "./game/gauntlet.ts";
 import { attachInput } from "./input/input.ts";
-import {
-  createSynth,
-  ensureAudioContext,
-  playBurst,
-  playCanJolt,
-  playCanLaunch,
-  playClimbStep,
-  playInflatePuff,
-  playRhythmBeat,
-  playRhythmHit,
-  playRhythmThud,
-  playSlip,
-  playTapBlip,
-  playTransitionSting,
-  playWinChord,
-  setMuted,
-} from "./audio/synth.ts";
-import { createOhNo, tapOhNo, tickOhNo, type OhNoState } from "./game/ohno.ts";
-import { createShake, tapShake, tickShake, type ShakeState } from "./game/shake.ts";
-import { createClimber, tapClimber, tickClimber, type ClimberState } from "./game/climber.ts";
-import { createRhythm, tapRhythm, tickRhythm, type RhythmState } from "./game/rhythm.ts";
-import { OHNO_LAPS, SHAKE_LAPS, CLIMBER_LAPS, RHYTHM_LAPS, type RoundId } from "./game/laps.ts";
+import { createSynth, ensureAudioContext, playTapBlip, playWinChord, setMuted } from "./audio/synth.ts";
+import { CPU_LAPS, createCpuTimer, tickCpuTimer, type CpuTimerState } from "./game/cpu.ts";
 import { mulberry32, type Rng } from "./game/rng.ts";
-import { drawOhno } from "./render/scenes/ohno.ts";
-import { drawShake, LAUNCH_MS as SHAKE_LAUNCH_MS, SLUMP_MS as SHAKE_SLUMP_MS } from "./render/scenes/shake.ts";
-import { drawClimber, FALL_MS as CLIMBER_FALL_MS } from "./render/scenes/climber.ts";
-import { drawRhythm } from "./render/scenes/rhythm.ts";
+import type { Place, Placing } from "./game/types.ts";
 import { drawAttract, type AttractState } from "./render/scenes/attract.ts";
 import { drawTransition, TRANSITION_DURATION_MS, TRANSITION_STING_MS } from "./render/scenes/transition.ts";
 import { drawDeadFurniture, drawWinBurst, WIN_BURST_MS } from "./render/scenes/dead.ts";
+import { drawPodium, PODIUM_DURATION_MS } from "./render/scenes/podium.ts";
 import { createPadPressState, drawFourPads, pressPad, tickPadPress, type PadPressState } from "./render/pads.ts";
-import { drawCharacter, neutralPose, squashPose, type EyeState, type MouthState } from "./render/character.ts";
+import { drawCharacter, neutralPose, squashPose } from "./render/character.ts";
 
-// How long each round's own fail animation runs before the fail screen's
-// shared furniture (pips + button) takes over - epic 6.6's 400ms hold is
-// added on top of each round's own animation duration (mirrored from each
-// scene's own constant; ohno's isn't exported, so 500 here matches its
-// BURST_MS exactly). Rhythm has no distinct fail animation, so it's 0.
-const DEAD_HOLD_MS = 400;
-const ROUND_FAIL_ANIM_MS: Record<RoundId, number> = {
-  ohno: 500,
-  shake: SHAKE_SLUMP_MS,
-  climber: CLIMBER_FALL_MS,
-  rhythm: 0,
-};
+// v2 rebuild step 2 (epic build-order): the gauntlet's phase machine now
+// resolves every round to a 3-racer placing via a podium screen, instead of a
+// solo cleared/lost status. The round content below is a THROWAWAY "first to
+// N pad taps wins" race — proof that attract -> transition -> round -> podium
+// -> next/dead/won is real end to end with 1 human + 2 CPU racers. It is not
+// a real microgame and is replaced entirely by task 013 (Shake the Can).
+
+const THROWAWAY_TARGET_TAPS = 15;
+const THROWAWAY_TIMEOUT_MS = 20_000;
 
 const canvas = document.getElementById("stage") as HTMLCanvasElement;
 const muteButton = document.getElementById("mute") as HTMLButtonElement;
@@ -65,21 +40,26 @@ const synth = createSynth();
 const PRESS_HOLD_MS = 90;
 
 let gauntlet: GauntletState = createGauntlet();
-let ohno: OhNoState = createOhNo();
-let ohnoSeed = 0;
-let shake: ShakeState = createShake();
-let shakeSeed = 0;
-let climber: ClimberState = createClimber();
-let climberSeed = 0;
-let climberRng: Rng = mulberry32(0);
-let rhythm: RhythmState = createRhythm();
-let resultElapsedMs = 0;
+let podiumElapsedMs = 0;
 let wonElapsedMs = 0;
 
 const attractState: AttractState = { seed: Math.floor(Math.random() * 0xffffffff), elapsedMs: 0, pressElapsedMs: null };
 let transitionElapsedMs = 0;
 let transitionSeed = 0;
 let transitionStingFired = false;
+
+let padPressState: PadPressState = createPadPressState();
+
+// Throwaway round state — reset in enterCurrentRound().
+let throwawayTaps: [number, number, number] = [0, 0, 0];
+let throwawayFinishOrder: [number | null, number | null, number | null] = [null, null, null];
+let throwawayFinishedCount = 0;
+let throwawayElapsedMs = 0;
+let throwawayCpuTimers: [CpuTimerState, CpuTimerState] = [
+  createCpuTimer(CPU_LAPS[1], mulberry32(1)),
+  createCpuTimer(CPU_LAPS[1], mulberry32(2)),
+];
+let throwawayRng: Rng = mulberry32(0);
 
 function syncMuteButton(): void {
   muteButton.setAttribute("aria-pressed", String(synth.muted));
@@ -91,22 +71,30 @@ muteButton.addEventListener("click", () => {
   syncMuteButton();
 });
 
-function enterCurrentRound(): void {
-  const round = currentRound(gauntlet);
-  resultElapsedMs = 0;
-  if (round === "ohno") {
-    ohno = createOhNo();
-    ohnoSeed = Math.floor(Math.random() * 0xffffffff);
-  } else if (round === "shake") {
-    shake = createShake();
-    shakeSeed = Math.floor(Math.random() * 0xffffffff);
-  } else if (round === "climber") {
-    climber = createClimber();
-    climberSeed = Math.floor(Math.random() * 0xffffffff);
-    climberRng = mulberry32(Math.floor(Math.random() * 0xffffffff));
-  } else if (round === "rhythm") {
-    rhythm = createRhythm();
+function resolveThrowawayPlacing(): Placing {
+  if (throwawayFinishedCount < 3) {
+    const remaining = ([0, 1, 2] as const).filter((r) => throwawayFinishOrder[r] === null);
+    remaining.sort((a, b) => throwawayTaps[b] - throwawayTaps[a]);
+    for (const r of remaining) throwawayFinishOrder[r] = throwawayFinishedCount++;
   }
+  return [
+    (throwawayFinishOrder[0]! + 1) as Place,
+    (throwawayFinishOrder[1]! + 1) as Place,
+    (throwawayFinishOrder[2]! + 1) as Place,
+  ];
+}
+
+function enterCurrentRound(): void {
+  throwawayTaps = [0, 0, 0];
+  throwawayFinishOrder = [null, null, null];
+  throwawayFinishedCount = 0;
+  throwawayElapsedMs = 0;
+  const seed = Math.floor(Math.random() * 0xffffffff);
+  throwawayRng = mulberry32(seed);
+  throwawayCpuTimers = [
+    createCpuTimer(CPU_LAPS[gauntlet.lap], mulberry32(seed ^ 0x9e3779b9)),
+    createCpuTimer(CPU_LAPS[gauntlet.lap], mulberry32(seed ^ 0x85ebca6b)),
+  ];
 }
 
 function beginTransition(): void {
@@ -132,77 +120,67 @@ function handleTap(): void {
     return;
   }
 
-  // Taps during the transition are swallowed (epic section 8) — the
-  // "round" phase is the only one that forwards taps into game logic.
-  if (gauntlet.phase !== "round") return;
-  const round = currentRound(gauntlet);
-  if (round === "ohno") {
-    const wasPlaying = ohno.status === "playing";
-    ohno = tapOhNo(ohno, OHNO_LAPS[gauntlet.lap]);
-    if (wasPlaying && ohno.status === "lost" && ohno.lossReason === "burst") {
-      playBurst(synth);
-    } else if (wasPlaying && ohno.status === "playing") {
-      playInflatePuff(synth);
-    }
-  } else if (round === "shake") {
-    if (shake.status === "playing") playCanJolt(synth);
-    shake = tapShake(shake, SHAKE_LAPS[gauntlet.lap]);
-  } else if (round === "rhythm") {
-    rhythm = tapRhythm(rhythm, RHYTHM_LAPS[gauntlet.lap]);
-    if (rhythm.lastEvent === "hit") playRhythmHit(synth);
-    else if (rhythm.lastEvent === "miss") playRhythmThud(synth);
-  }
+  // Taps during the transition and the podium hold are swallowed — only the
+  // "round" phase forwards input into game logic (epic section 8).
 }
 
-function handleTapSide(side: "LEFT" | "RIGHT"): void {
-  if (gauntlet.phase !== "round") return;
-  if (currentRound(gauntlet) !== "climber") return;
-  if (climber.status !== "playing" || climber.stunRemaining > 0) return;
+function handlePad(padIndex: 0 | 1 | 2 | 3): void {
+  ensureAudioContext(synth);
+  padPressState = pressPad(padPressState, padIndex);
 
-  const before = climber.floor;
-  climber = tapClimber(climber, CLIMBER_LAPS[gauntlet.lap], side, climberRng);
-  if (climber.floor > before) {
-    playClimbStep(synth, side);
-  } else {
-    playSlip(synth);
+  if (gauntlet.phase !== "round") return;
+  if (throwawayFinishOrder[0] !== null) return;
+
+  throwawayTaps[0]++;
+  playTapBlip(synth);
+  if (throwawayTaps[0] >= THROWAWAY_TARGET_TAPS) {
+    throwawayFinishOrder[0] = throwawayFinishedCount++;
   }
 }
-
-// TEMPORARY v2 demo state (task 011 of the epic-crit5-game v2 rebuild): proves
-// the new character rig (src/render/character.ts) and four-pad input
-// (src/render/pads.ts, src/input/input.ts's onPad) work together in
-// isolation, ahead of the real gauntlet/podium rework in task 012, which will
-// remove this block entirely.
-let v2DemoPadPress: PadPressState = createPadPressState();
-let v2DemoEye: EyeState = "normal";
-let v2DemoMouth: MouthState = "neutral";
-let v2DemoSquash = 0;
 
 attachInput(canvas, {
   onTap: handleTap,
-  onTapLeft: () => handleTapSide("LEFT"),
-  onTapRight: () => handleTapSide("RIGHT"),
-  onPad: (_player, padIndex) => {
-    v2DemoPadPress = pressPad(v2DemoPadPress, padIndex);
-    v2DemoEye = "wide";
-    v2DemoMouth = "grin";
-    v2DemoSquash = 1;
-  },
+  onPad: (_player, padIndex) => handlePad(padIndex),
 });
 
 window.addEventListener("resize", () => resizeStage(stage));
 
+// The transition routine's wipe reveals this "incoming scene" preview behind
+// it — a generic standing-racers preview, since the throwaway round has no
+// per-round static scene of its own. Real microgames (tasks 013-016) will
+// give drawTransition their own preview via the same callback shape.
 function drawIncomingRoundStatic(): void {
-  const round = currentRound(gauntlet);
-  if (round === "ohno") {
-    drawOhno(stage, createOhNo(), OHNO_LAPS[gauntlet.lap], transitionSeed, 0);
-  } else if (round === "shake") {
-    drawShake(stage, createShake(), SHAKE_LAPS[gauntlet.lap], transitionSeed, 0);
-  } else if (round === "climber") {
-    drawClimber(stage, createClimber(), CLIMBER_LAPS[gauntlet.lap], transitionSeed, 0);
-  } else if (round === "rhythm") {
-    drawRhythm(stage, createRhythm(), RHYTHM_LAPS[gauntlet.lap], 0);
+  const spacing = stage.width / 4;
+  for (let i = 0; i < 3; i++) {
+    drawCharacter(stage, {
+      seed: i + 1,
+      cx: spacing * (i + 1),
+      feetY: stage.height * 0.7,
+      heightU: 22,
+      color: gauntlet.racers[i].colour,
+      eye: "normal",
+      mouth: "neutral",
+      pose: neutralPose(),
+    });
   }
+}
+
+function drawThrowawayRound(): void {
+  const spacing = stage.width / 4;
+  for (let i = 0; i < 3; i++) {
+    const progress = Math.min(1, throwawayTaps[i] / THROWAWAY_TARGET_TAPS);
+    drawCharacter(stage, {
+      seed: i + 1,
+      cx: spacing * (i + 1),
+      feetY: stage.height * 0.7,
+      heightU: 22,
+      color: gauntlet.racers[i].colour,
+      eye: progress > 0.5 ? "wide" : "normal",
+      mouth: progress > 0.5 ? "gritted" : "neutral",
+      pose: squashPose(progress * 0.4),
+    });
+  }
+  drawFourPads(stage, padPressState);
 }
 
 let lastTime = performance.now();
@@ -226,7 +204,6 @@ function frame(now: number): void {
   if (gauntlet.phase === "transition") {
     transitionElapsedMs += dtMs;
     if (!transitionStingFired && transitionElapsedMs >= TRANSITION_STING_MS) {
-      playTransitionSting(synth);
       transitionStingFired = true;
     }
     if (transitionElapsedMs >= TRANSITION_DURATION_MS) {
@@ -235,139 +212,69 @@ function frame(now: number): void {
     }
   }
 
-  if (gauntlet.phase === "round" && currentRound(gauntlet) === "ohno") {
-    ohno = tickOhNo(ohno, OHNO_LAPS[gauntlet.lap], dt);
-    if (ohno.status === "cleared") {
-      gauntlet = roundCleared(gauntlet);
-      if (gauntlet.phase === "transition") beginTransition();
-    } else if (ohno.status === "lost") {
-      gauntlet = roundLost(gauntlet);
-    }
-  }
-
-  if (gauntlet.phase === "round" && currentRound(gauntlet) === "shake") {
-    const wasPlaying = shake.status === "playing";
-    shake = tickShake(shake, SHAKE_LAPS[gauntlet.lap], dt);
-    if (wasPlaying && shake.status === "cleared") {
-      playCanLaunch(synth);
-    }
-    if (shake.status === "cleared") {
-      // Hold in the round phase so the 0.8s launch animation actually plays
-      // before the transition wipes over it (unlike Oh No, which has no
-      // clear animation and can cut to the next transition immediately).
-      resultElapsedMs += dtMs;
-      if (resultElapsedMs >= SHAKE_LAUNCH_MS) {
-        gauntlet = roundCleared(gauntlet);
-        if (gauntlet.phase === "transition") beginTransition();
+  if (gauntlet.phase === "round") {
+    throwawayElapsedMs += dtMs;
+    const cpuConfig = CPU_LAPS[gauntlet.lap];
+    for (const racerId of [1, 2] as const) {
+      if (throwawayFinishOrder[racerId] !== null) continue;
+      const tick = tickCpuTimer(throwawayCpuTimers[racerId - 1], cpuConfig, dtMs, throwawayRng);
+      throwawayCpuTimers[racerId - 1] = tick.timer;
+      if (tick.acted && !tick.errored) {
+        throwawayTaps[racerId]++;
+        if (throwawayTaps[racerId] >= THROWAWAY_TARGET_TAPS) {
+          throwawayFinishOrder[racerId] = throwawayFinishedCount++;
+        }
       }
-    } else if (shake.status === "lost") {
-      gauntlet = roundLost(gauntlet);
+    }
+
+    if (throwawayFinishedCount === 3 || throwawayElapsedMs >= THROWAWAY_TIMEOUT_MS) {
+      const placing = resolveThrowawayPlacing();
+      gauntlet = roundResolved(gauntlet, placing);
+      podiumElapsedMs = 0;
     }
   }
 
-  if (gauntlet.phase === "round" && currentRound(gauntlet) === "climber") {
-    climber = tickClimber(climber, CLIMBER_LAPS[gauntlet.lap], dt);
-    if (climber.status === "cleared") {
-      gauntlet = roundCleared(gauntlet);
-      if (gauntlet.phase === "transition") beginTransition();
-    } else if (climber.status === "lost") {
-      gauntlet = roundLost(gauntlet);
-    }
-  }
-
-  if (gauntlet.phase === "round" && currentRound(gauntlet) === "rhythm") {
-    const beatPeriod = 60 / RHYTHM_LAPS[gauntlet.lap].bpm;
-    const beforeBeatIndex = Math.floor(rhythm.elapsed / beatPeriod);
-    rhythm = tickRhythm(rhythm, RHYTHM_LAPS[gauntlet.lap], dt);
-    const afterBeatIndex = Math.floor(rhythm.elapsed / beatPeriod);
-    if (afterBeatIndex > beforeBeatIndex) playRhythmBeat(synth);
-    if (rhythm.status === "cleared") {
-      gauntlet = roundCleared(gauntlet);
+  if (gauntlet.phase === "podium") {
+    podiumElapsedMs += dtMs;
+    if (podiumElapsedMs >= PODIUM_DURATION_MS) {
+      const wasEliminated = gauntlet.eliminated;
+      gauntlet = podiumFinished(gauntlet);
       if (gauntlet.phase === "transition") beginTransition();
       else if (gauntlet.phase === "won") {
         wonElapsedMs = 0;
         playWinChord(synth);
       }
-    } else if (rhythm.status === "lost") {
-      gauntlet = roundLost(gauntlet);
+      void wasEliminated;
     }
-  }
-
-  if (
-    gauntlet.phase === "dead" &&
-    (ohno.status === "lost" || shake.status === "lost" || climber.status === "lost" || rhythm.status === "lost")
-  ) {
-    resultElapsedMs += dtMs;
-  }
-
-  if (gauntlet.phase === "won") {
-    wonElapsedMs += dtMs;
   }
 
   const paletteId =
     gauntlet.phase === "dead" || gauntlet.phase === "won"
       ? "dead"
-      : gauntlet.phase === "round" || gauntlet.phase === "transition"
+      : gauntlet.phase === "round" || gauntlet.phase === "transition" || gauntlet.phase === "podium"
         ? currentRound(gauntlet)
         : "attract";
   const palette = PALETTES[paletteId];
   document.body.style.background = palette.bg;
   fillBackground(stage, palette);
 
-  // The losing round's own fail animation (built per-round in tasks
-  // 002-006) plays out in place before the shared fail-screen furniture
-  // (pips + button) takes over, per epic 6.6's 400ms hold.
-  const deadFurnitureReady =
-    gauntlet.phase === "dead" && resultElapsedMs >= ROUND_FAIL_ANIM_MS[currentRound(gauntlet)] + DEAD_HOLD_MS;
-
   if (gauntlet.phase === "attract") {
     drawAttract(stage, attractState);
   } else if (gauntlet.phase === "transition") {
     drawTransition(stage, transitionElapsedMs, { toRound: currentRound(gauntlet), seed: transitionSeed }, drawIncomingRoundStatic);
-  } else if (gauntlet.phase === "round" && currentRound(gauntlet) === "ohno") {
-    drawOhno(stage, ohno, OHNO_LAPS[gauntlet.lap], ohnoSeed, resultElapsedMs);
-  } else if (gauntlet.phase === "round" && currentRound(gauntlet) === "shake") {
-    drawShake(stage, shake, SHAKE_LAPS[gauntlet.lap], shakeSeed, resultElapsedMs);
-  } else if (gauntlet.phase === "round" && currentRound(gauntlet) === "climber") {
-    drawClimber(stage, climber, CLIMBER_LAPS[gauntlet.lap], climberSeed, resultElapsedMs);
-  } else if (gauntlet.phase === "round" && currentRound(gauntlet) === "rhythm") {
-    drawRhythm(stage, rhythm, RHYTHM_LAPS[gauntlet.lap], resultElapsedMs);
-  } else if (gauntlet.phase === "dead" && !deadFurnitureReady && currentRound(gauntlet) === "ohno") {
-    drawOhno(stage, ohno, OHNO_LAPS[gauntlet.lap], ohnoSeed, resultElapsedMs);
-  } else if (gauntlet.phase === "dead" && !deadFurnitureReady && currentRound(gauntlet) === "shake") {
-    drawShake(stage, shake, SHAKE_LAPS[gauntlet.lap], shakeSeed, resultElapsedMs);
-  } else if (gauntlet.phase === "dead" && !deadFurnitureReady && currentRound(gauntlet) === "climber") {
-    drawClimber(stage, climber, CLIMBER_LAPS[gauntlet.lap], climberSeed, resultElapsedMs);
-  } else if (gauntlet.phase === "dead" && !deadFurnitureReady && currentRound(gauntlet) === "rhythm") {
-    drawRhythm(stage, rhythm, RHYTHM_LAPS[gauntlet.lap], resultElapsedMs);
-  } else if (gauntlet.phase === "dead" && deadFurnitureReady) {
-    drawDeadFurniture(stage, gauntlet.cleared, resultElapsedMs);
+  } else if (gauntlet.phase === "round") {
+    drawThrowawayRound();
+  } else if (gauntlet.phase === "podium" && gauntlet.lastPlacing) {
+    drawPodium(stage, gauntlet.racers, gauntlet.lastPlacing, podiumElapsedMs);
+  } else if (gauntlet.phase === "dead") {
+    drawDeadFurniture(stage, gauntlet.cleared, podiumElapsedMs);
   } else if (gauntlet.phase === "won" && wonElapsedMs < WIN_BURST_MS) {
     drawWinBurst(stage, wonElapsedMs);
   } else if (gauntlet.phase === "won") {
     drawDeadFurniture(stage, gauntlet.cleared, wonElapsedMs);
   }
 
-  // TEMPORARY v2 demo overlay (see the block above) — always on top,
-  // regardless of gauntlet phase, purely to prove the rig + pad input work.
-  // Removed by task 012 once the real racer/podium rendering exists.
-  v2DemoPadPress = tickPadPress(v2DemoPadPress, dtMs);
-  v2DemoSquash = Math.max(0, v2DemoSquash - dt * 2.5);
-  if (v2DemoSquash <= 0 && v2DemoEye !== "normal") {
-    v2DemoEye = "normal";
-    v2DemoMouth = "neutral";
-  }
-  drawFourPads(stage, v2DemoPadPress);
-  drawCharacter(stage, {
-    seed: 1,
-    cx: stage.width * 0.5,
-    feetY: stage.height * 0.78,
-    heightU: 30,
-    color: "#FF2D1F",
-    eye: v2DemoEye,
-    mouth: v2DemoMouth,
-    pose: v2DemoSquash > 0 ? squashPose(v2DemoSquash) : neutralPose(),
-  });
+  padPressState = tickPadPress(padPressState, dtMs);
 
   requestAnimationFrame(frame);
 }
