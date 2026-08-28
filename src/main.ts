@@ -13,13 +13,16 @@ import { attachInput } from "./input/input.ts";
 import {
   createSynth,
   ensureAudioContext,
+  playBurst,
   playCanJolt,
   playCanLaunch,
   playClimbStep,
+  playInflatePuff,
   playRhythmBeat,
   playRhythmHit,
   playRhythmThud,
   playSlip,
+  playTapBlip,
   playTransitionSting,
   playWinChord,
   setMuted,
@@ -116,6 +119,7 @@ function handleTap(): void {
   if (gauntlet.phase === "attract") {
     if (attractState.pressElapsedMs === null) {
       attractState.pressElapsedMs = 0;
+      playTapBlip(synth);
     }
     return;
   }
@@ -131,7 +135,13 @@ function handleTap(): void {
   if (gauntlet.phase !== "round") return;
   const round = currentRound(gauntlet);
   if (round === "ohno") {
+    const wasPlaying = ohno.status === "playing";
     ohno = tapOhNo(ohno, OHNO_LAPS[gauntlet.lap]);
+    if (wasPlaying && ohno.status === "lost" && ohno.lossReason === "burst") {
+      playBurst(synth);
+    } else if (wasPlaying && ohno.status === "playing") {
+      playInflatePuff(synth);
+    }
   } else if (round === "shake") {
     if (shake.status === "playing") playCanJolt(synth);
     shake = tapShake(shake, SHAKE_LAPS[gauntlet.lap]);

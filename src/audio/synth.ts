@@ -48,6 +48,88 @@ export function setMuted(synth: Synth, muted: boolean): void {
   writeMuted(muted);
 }
 
+// Epic section 10: square 220 Hz, 40ms, gain 0.12. The generic UI-tap
+// sound - fires on the attract screen's tap-to-start, which has no round
+// of its own to give it a bespoke effect the way ohno/shake/climber do.
+export function playTapBlip(synth: Synth): void {
+  if (!synth.ctx || !synth.master) return;
+  const ctx = synth.ctx;
+  const master = synth.master;
+  const now = ctx.currentTime;
+  const durationSec = 0.04;
+
+  const osc = ctx.createOscillator();
+  osc.type = "square";
+  osc.frequency.value = 220;
+
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0.12, now);
+  gain.gain.linearRampToValueAtTime(0.0001, now + durationSec);
+
+  osc.connect(gain);
+  gain.connect(master);
+  osc.start(now);
+  osc.stop(now + durationSec);
+}
+
+// Epic section 10: square 300 -> 380 Hz over 60ms. Fires on every Oh No tap
+// that keeps the balloon inflating (i.e. doesn't burst it) - the balloon's
+// own tap sound, distinct from the generic tap blip.
+export function playInflatePuff(synth: Synth): void {
+  if (!synth.ctx || !synth.master) return;
+  const ctx = synth.ctx;
+  const master = synth.master;
+  const now = ctx.currentTime;
+  const durationSec = 0.06;
+
+  const osc = ctx.createOscillator();
+  osc.type = "square";
+  osc.frequency.setValueAtTime(300, now);
+  osc.frequency.exponentialRampToValueAtTime(380, now + durationSec);
+
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0.2, now);
+  gain.gain.linearRampToValueAtTime(0.0001, now + durationSec);
+
+  osc.connect(gain);
+  gain.connect(master);
+  osc.start(now);
+  osc.stop(now + durationSec);
+}
+
+// Epic section 10: white noise 250ms + square 400 -> 60 Hz over 250ms.
+// Fires once on the tap that pushes Oh No's balloon past burstAt.
+export function playBurst(synth: Synth): void {
+  if (!synth.ctx || !synth.master) return;
+  const ctx = synth.ctx;
+  const master = synth.master;
+  const now = ctx.currentTime;
+  const durationSec = 0.25;
+
+  const buffer = noiseBuffer(ctx, durationSec);
+  const source = ctx.createBufferSource();
+  source.buffer = buffer;
+  const noiseGain = ctx.createGain();
+  noiseGain.gain.setValueAtTime(0.25, now);
+  noiseGain.gain.linearRampToValueAtTime(0.0001, now + durationSec);
+  source.connect(noiseGain);
+  noiseGain.connect(master);
+  source.start(now);
+  source.stop(now + durationSec);
+
+  const osc = ctx.createOscillator();
+  osc.type = "square";
+  osc.frequency.setValueAtTime(400, now);
+  osc.frequency.exponentialRampToValueAtTime(60, now + durationSec);
+  const toneGain = ctx.createGain();
+  toneGain.gain.setValueAtTime(0.2, now);
+  toneGain.gain.linearRampToValueAtTime(0.0001, now + durationSec);
+  osc.connect(toneGain);
+  toneGain.connect(master);
+  osc.start(now);
+  osc.stop(now + durationSec);
+}
+
 // Epic section 10: pitch-bent square 880 -> 1760 Hz, 180ms, two detuned
 // voices. Fires once at t=0.45 of the transition routine (epic section 8).
 export function playTransitionSting(synth: Synth): void {
