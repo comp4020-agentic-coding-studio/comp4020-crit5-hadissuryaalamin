@@ -6,10 +6,10 @@ import { keyedRange } from "../../game/rng.ts";
 const PULSE_PERIOD_MS = 800;
 
 // The 2x2 grid in the wordless logo lockup — every microgame's icon in its
-// own primary colour, per epic 6.1. Only Oh No has real gameplay yet, but the
-// lockup shows all four: it is a fixed piece of branding, not a menu.
+// own primary colour, per epic 6.1. The lockup shows all four whether or not
+// each is rebuilt yet: it is a fixed piece of branding, not a menu.
 const LOCKUP_ICONS: { kind: IconKind; color: string }[] = [
-  { kind: "balloon", color: PALETTES.ohno.primary },
+  { kind: "bomb", color: PALETTES.ohno.primary },
   { kind: "can", color: PALETTES.shake.primary },
   { kind: "tower", color: PALETTES.climber.primary },
   { kind: "ball", color: PALETTES.rhythm.primary },

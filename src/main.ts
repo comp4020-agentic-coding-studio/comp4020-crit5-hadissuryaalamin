@@ -13,6 +13,7 @@ import { attachInput } from "./input/input.ts";
 import {
   createSynth,
   ensureAudioContext,
+  playBurst,
   playCanJolt,
   playCanLaunch,
   playClimbStep,
@@ -24,6 +25,15 @@ import {
 import { CPU_LAPS, createCpuTimer, tickCpuTimer, type CpuTimerState } from "./game/cpu.ts";
 import { createCan, resolveCanPlacing, tapCan, tickCan, type CanState } from "./game/can.ts";
 import {
+  createBomb,
+  PASS_PAD,
+  resolveBombPlacing,
+  tapBomb,
+  tickBomb,
+  wrongPad as wrongBombPad,
+  type BombState,
+} from "./game/bomb.ts";
+import {
   createClimber,
   resolveClimberPlacing,
   tapClimber,
@@ -31,7 +41,7 @@ import {
   wrongPad,
   type ClimberState,
 } from "./game/climber.ts";
-import { CAN_LAPS, CLIMBER_LAPS } from "./game/laps.ts";
+import { BOMB_LAPS, CAN_LAPS, CLIMBER_LAPS } from "./game/laps.ts";
 import { mulberry32, type Rng } from "./game/rng.ts";
 import type { Place, Placing } from "./game/types.ts";
 import { drawAttract, type AttractState } from "./render/scenes/attract.ts";
@@ -40,6 +50,7 @@ import { drawDeadFurniture, drawWinBurst, WIN_BURST_MS } from "./render/scenes/d
 import { drawPodium, PODIUM_DURATION_MS } from "./render/scenes/podium.ts";
 import { drawCan } from "./render/scenes/can.ts";
 import { climberGlowPulse, drawClimber } from "./render/scenes/climber.ts";
+import { bombPassPulse, drawBomb, EXPLOSION_HOLD_MS } from "./render/scenes/bomb.ts";
 import {
   createPadPressState,
   drawFourPads,
@@ -52,12 +63,12 @@ import { drawCharacter, neutralPose, squashPose } from "./render/character.ts";
 
 // v2 rebuild step 2 (epic build-order) wired the gauntlet's phase machine to
 // resolve every round to a 3-racer placing via a podium screen, instead of a
-// solo cleared/lost status. Step 3 (Shake) and step 4 (this file's Climber
-// wiring) each replace the THROWAWAY "first to N pad taps wins" race with a
-// real microgame — but only for their own round id. Oh No / Rhythm are
-// rebuilt in tasks 015/016 respectively and still run on the throwaway
-// round in the meantime; the code paths below are branched on
-// currentRound(gauntlet) so real and not-yet-rebuilt rounds can coexist.
+// solo cleared/lost status. Steps 3, 4 and 5 (Shake, Climber, and this file's
+// Oh No wiring) each replace the THROWAWAY "first to N pad taps wins" race
+// with a real microgame — but only for their own round id. Rhythm is rebuilt
+// in task 016 and still runs on the throwaway round in the meantime; the code
+// paths below are branched on currentRound(gauntlet) so real and
+// not-yet-rebuilt rounds can coexist.
 
 const THROWAWAY_TARGET_TAPS = 15;
 const THROWAWAY_TIMEOUT_MS = 20_000;
@@ -117,6 +128,23 @@ let climberCpuTimers: [CpuTimerState, CpuTimerState] = [
   createCpuTimer(CPU_LAPS[1], mulberry32(10)),
 ];
 
+// Oh No state - reset in enterCurrentRound(). The bomb RULE consumes no
+// randomness at all (one fixed pass pad, one fixed ring order), so unlike
+// Climber there is no rule stream to keep separate: `bombCpuRng` is the only
+// live stream, feeding the rivals' error rolls and the pad they fumble onto,
+// and `bombSeed` is the scene's stable per-round jitter. Keeping the CPU
+// stream to itself still matters — a rival's mistakes must never shift what
+// the human is reading. `bombExplodeMs` holds the bomb scene on screen after
+// the fuse dies so the bang is actually seen before the podium takes over.
+let bombState: BombState = createBomb(BOMB_LAPS[1]);
+let bombCpuRng: Rng = mulberry32(11);
+let bombSeed = 0;
+let bombExplodeMs = 0;
+let bombCpuTimers: [CpuTimerState, CpuTimerState] = [
+  createCpuTimer(CPU_LAPS[1], mulberry32(12)),
+  createCpuTimer(CPU_LAPS[1], mulberry32(13)),
+];
+
 function syncMuteButton(): void {
   muteButton.setAttribute("aria-pressed", String(synth.muted));
 }
@@ -167,6 +195,15 @@ function enterCurrentRound(): void {
   climberCpuTimers = [
     createCpuTimer(CPU_LAPS[gauntlet.lap], mulberry32(climberSeed ^ 0x6c078965)),
     createCpuTimer(CPU_LAPS[gauntlet.lap], mulberry32(climberSeed ^ 0x1b873593)),
+  ];
+
+  bombState = createBomb(BOMB_LAPS[gauntlet.lap]);
+  bombExplodeMs = 0;
+  bombSeed = Math.floor(Math.random() * 0xffffffff);
+  bombCpuRng = mulberry32(bombSeed ^ 0x7feb352d);
+  bombCpuTimers = [
+    createCpuTimer(CPU_LAPS[gauntlet.lap], mulberry32(bombSeed ^ 0x846ca68b)),
+    createCpuTimer(CPU_LAPS[gauntlet.lap], mulberry32(bombSeed ^ 0xc2b2ae35)),
   ];
 }
 
@@ -220,6 +257,18 @@ function handlePad(padIndex: 0 | 1 | 2 | 3): void {
     const correct = padIndex === before.expectedPad;
     climberState = tapClimber(climberState, 0, padIndex, CLIMBER_LAPS[gauntlet.lap], climberRng);
     if (correct) playClimbStep(synth, padIndex);
+    else playSlip(synth);
+    return;
+  }
+
+  if (currentRound(gauntlet) === "ohno") {
+    if (bombState.status !== "playing") return;
+    // A tap from someone who is not holding the bomb, or who is still frozen
+    // after a fumble, is silent as well as inert - the silence IS the readout
+    // that it is not your problem yet (or not yet again).
+    if (bombState.holder !== 0 || bombState.racers[0].stunRemaining > 0) return;
+    bombState = tapBomb(bombState, 0, padIndex, BOMB_LAPS[gauntlet.lap]);
+    if (padIndex === PASS_PAD) playTapBlip(synth);
     else playSlip(synth);
     return;
   }
@@ -351,6 +400,40 @@ function frame(now: number): void {
       gauntlet = roundResolved(gauntlet, resolveClimberPlacing(climberState));
       podiumElapsedMs = 0;
     }
+  } else if (gauntlet.phase === "round" && currentRound(gauntlet) === "ohno") {
+    const config = BOMB_LAPS[gauntlet.lap];
+    const cpuConfig = CPU_LAPS[gauntlet.lap];
+
+    // Only the racer actually holding the bomb has a decision to make, so
+    // only their reaction clock runs: a CPU's reaction is measured from the
+    // moment the bomb lands in their hands, and freezes again the instant
+    // they get rid of it. A stunned rival's clock stops too, which is what
+    // makes their fumble visibly cost them the same tempo it costs a human.
+    const holder = bombState.holder;
+    if (bombState.status === "playing" && holder !== 0 && bombState.racers[holder].stunRemaining <= 0) {
+      const tick = tickCpuTimer(bombCpuTimers[holder - 1], cpuConfig, dtMs, bombCpuRng);
+      bombCpuTimers[holder - 1] = tick.timer;
+      if (tick.acted) {
+        // A CPU error here reads as grabbing for the wrong pad - the same
+        // fumble and the same stun a human gets (epic section 5).
+        const padIndex = tick.errored ? wrongBombPad(bombCpuRng) : PASS_PAD;
+        bombState = tapBomb(bombState, holder, padIndex, config);
+      }
+    }
+
+    bombState = tickBomb(bombState, config, dt);
+    // Checked AFTER the tick, never against a pre-tick snapshot. The bang is
+    // then held on screen for EXPLOSION_HOLD_MS before the placing is handed
+    // to the gauntlet, because a fail the player never sees is not a fail
+    // they can learn from (spec line 2: it can be lost).
+    if (bombState.status === "resolved") {
+      if (bombExplodeMs === 0) playBurst(synth);
+      bombExplodeMs += dtMs;
+      if (bombExplodeMs >= EXPLOSION_HOLD_MS) {
+        gauntlet = roundResolved(gauntlet, resolveBombPlacing(bombState));
+        podiumElapsedMs = 0;
+      }
+    }
   } else if (gauntlet.phase === "round") {
     throwawayElapsedMs += dtMs;
     const cpuConfig = CPU_LAPS[gauntlet.lap];
@@ -415,6 +498,17 @@ function frame(now: number): void {
         ? { index: human.expectedPad, pulse: climberGlowPulse(climberState.elapsedMs) }
         : null;
     drawFourPads(stage, padPressState, glow);
+  } else if (gauntlet.phase === "round" && currentRound(gauntlet) === "ohno") {
+    drawBomb(stage, bombState, BOMB_LAPS[gauntlet.lap], gauntlet.racers, bombSeed, bombExplodeMs);
+    // Pad 0 pulses only while the HUMAN is holding the bomb - the pad lights
+    // up exactly when it is their problem, and goes quiet the instant they
+    // pass. That pairing, plus the ring around the bomb on the same pulse
+    // phase, is the whole self-taught lesson of the round (epic 7.3).
+    const passGlow: PadGlow | null =
+      bombState.status === "playing" && bombState.holder === 0
+        ? { index: PASS_PAD, pulse: bombPassPulse(bombState.elapsedMs) }
+        : null;
+    drawFourPads(stage, padPressState, passGlow);
   } else if (gauntlet.phase === "round") {
     drawThrowawayRound();
   } else if (gauntlet.phase === "podium" && gauntlet.lastPlacing) {

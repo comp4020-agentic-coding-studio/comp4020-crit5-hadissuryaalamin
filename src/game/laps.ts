@@ -1,4 +1,4 @@
-import type { OhNoConfig } from "./ohno.ts";
+import type { BombConfig } from "./bomb.ts";
 import type { CanConfig } from "./can.ts";
 import type { ClimberConfig } from "./climber.ts";
 import type { RhythmConfig } from "./rhythm.ts";
@@ -15,40 +15,32 @@ export const ROUND_ORDER: RoundId[] = ["shake", "climber", "ohno", "rhythm"];
 
 export type Lap = 1 | 2 | 3;
 
-// Epic section 11.1. The ramp works on three axes at once: the band narrows,
-// the burst ceiling drops, and each tap moves you further, so overshoot gets
-// easier every lap while the skill required rises.
-export const OHNO_LAPS: Record<Lap, OhNoConfig> = {
-  1: {
-    tapGain: 0.09,
-    leakPerSec: 0.16,
-    bandInner: 0.55,
-    bandOuter: 0.75,
-    burstAt: 1.0,
-    shrivelAt: 0.05,
-    holdNeeded: 3.0,
-    capSeconds: 16,
-  },
-  2: {
-    tapGain: 0.11,
-    leakPerSec: 0.2,
-    bandInner: 0.58,
-    bandOuter: 0.72,
-    burstAt: 0.95,
-    shrivelAt: 0.06,
-    holdNeeded: 3.5,
-    capSeconds: 15,
-  },
-  3: {
-    tapGain: 0.13,
-    leakPerSec: 0.24,
-    bandInner: 0.6,
-    bandOuter: 0.7,
-    burstAt: 0.88,
-    shrivelAt: 0.07,
-    holdNeeded: 4.0,
-    capSeconds: 14,
-  },
+// Oh No! It's Gonna Explode (epic v2 section 7.3, CONFIRMED fixed pass-pad
+// rule). The v1 balloon table is void along with the game it belonged to.
+// These are DERIVED starting numbers, not tuned ones — task 019 owns tuning.
+//
+// How they were derived. A pass costs a racer roughly one reaction time, and
+// src/game/cpu.ts's per-lap bands are 520-700 / 400-560 / 320-460 ms, so a
+// lap of clean passing cycles the bomb around all three seats in about 1.8 /
+// 1.4 / 1.2 seconds. A 9.0s fuse on lap 1 is therefore about five trips
+// around the ring: long enough that a stranger who fumbles their first hold
+// still has several clean passes left to prove they learned it, which is what
+// section 7.3's "how it teaches itself" depends on.
+//
+// The ramp runs on both axes at once. The fuse shortens (fewer holds, so each
+// one matters more), and fumbleStun lengthens (a fumble costs a bigger slice
+// of the remaining fuse). Note the CPU table ramps underneath this too: as
+// rivals pass faster, the bomb comes back around to the human sooner, so the
+// number of decisions per second rises even as the round gets shorter.
+//
+// fumbleStun starts at 0.45s — longer than Climber's 0.35s slip, because here
+// the punishment is watching the shared fuse burn while you cannot pass, and
+// it needs to be long enough to feel like a real loss of tempo, but under one
+// full pass cycle so a single early fumble is survivable.
+export const BOMB_LAPS: Record<Lap, BombConfig> = {
+  1: { fuseSeconds: 9.0, fumbleStun: 0.45 },
+  2: { fuseSeconds: 7.5, fumbleStun: 0.55 },
+  3: { fuseSeconds: 6.0, fumbleStun: 0.65 },
 };
 
 // v2 epic section 7.1 (CONFIRMED: fixed-length contest, not first-to-full) —

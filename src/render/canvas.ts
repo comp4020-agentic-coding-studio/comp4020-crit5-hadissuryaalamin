@@ -12,7 +12,15 @@ export type PaletteId = "attract" | "ohno" | "shake" | "climber" | "rhythm" | "d
 
 export const PALETTES: Record<PaletteId, Palette> = {
   attract: { bg: "#FF3EA5", primary: "#FFD400", accent: "#00E0FF", pop: "#14100E" },
-  ohno: { bg: "#2A2320", primary: "#FF2D1F", accent: "#FFD400", pop: "#FF7BD5" },
+  // Oh No's background was v1's near-black #2A2320, chosen for a scene that no
+  // longer exists. Screenshotted with the v2 cast standing in it: the rig
+  // outlines its characters in INK, so three ink-outlined figures on a
+  // near-black ground read as three black blobs — and this round's whole
+  // readout is who is panicking (epic 8.3). Lifted to a smoky mid-tone: dark
+  // enough to keep the "someone turned the lights down" mood a bomb wants,
+  // light enough for ink outlines, the RED pass ring and the YELLOW spark to
+  // all carry.
+  ohno: { bg: "#8A7563", primary: "#FF2D1F", accent: "#FFD400", pop: "#FF7BD5" },
   shake: { bg: "#00A9A5", primary: "#FF7A00", accent: "#FFF06A", pop: "#E8175D" },
   climber: { bg: "#FFE119", primary: "#2B7FFF", accent: "#FF4FA3", pop: "#00C2A8" },
   rhythm: { bg: "#2B0F45", primary: "#FF2FB9", accent: "#43F5C4", pop: "#FFC803" },

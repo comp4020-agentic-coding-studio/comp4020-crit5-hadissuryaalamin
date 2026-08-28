@@ -98,7 +98,9 @@ export function playInflatePuff(synth: Synth): void {
 }
 
 // Epic section 10: white noise 250ms + square 400 -> 60 Hz over 250ms.
-// Fires once on the tap that pushes Oh No's balloon past burstAt.
+// Fires once when Oh No's fuse reaches zero and the bomb goes off. (The
+// machinery survives v1 unchanged; only what sets it off has changed — the
+// dedicated fuse hiss and a purpose-built bang belong to the audio pass.)
 export function playBurst(synth: Synth): void {
   if (!synth.ctx || !synth.master) return;
   const ctx = synth.ctx;

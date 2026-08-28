@@ -161,12 +161,14 @@ export function pad(
   wonkyStroke(ctx, path, strokeWeight(width, true), strokeOffset);
 }
 
-export type IconKind = "balloon" | "can" | "tower" | "ball";
+export type IconKind = "bomb" | "can" | "tower" | "ball";
 
 // Which icon represents each round — used by the attract screen's logo
 // lockup and the transition routine's icon card (epic sections 6.1 and 8).
 export const ROUND_ICON: Record<RoundId, IconKind> = {
-  ohno: "balloon",
+  // Round id "ohno" is a bomb in v2, not v1's balloon — that microgame was
+  // built by mistake and has been deleted (epic section 9).
+  ohno: "bomb",
   shake: "can",
   climber: "tower",
   rhythm: "ball",
@@ -187,13 +189,25 @@ export function icon(
 
   const path = new Path2D();
   switch (kind) {
-    case "balloon":
-      path.arc(0, -size * 0.1, size * 0.4, 0, Math.PI * 2);
-      path.moveTo(-size * 0.08, size * 0.28);
-      path.lineTo(size * 0.08, size * 0.28);
-      path.lineTo(0, size * 0.4);
+    case "bomb": {
+      path.arc(0, size * 0.12, size * 0.33, 0, Math.PI * 2);
+      path.rect(-size * 0.09, -size * 0.32, size * 0.18, size * 0.15);
+      // The spark on the fuse, as a small eight-point star up and to the
+      // right — enough to read as "lit" at card size.
+      const sx = size * 0.3;
+      const sy = -size * 0.44;
+      const s = size * 0.15;
+      path.moveTo(sx, sy - s);
+      path.lineTo(sx + s * 0.35, sy - s * 0.35);
+      path.lineTo(sx + s, sy);
+      path.lineTo(sx + s * 0.35, sy + s * 0.35);
+      path.lineTo(sx, sy + s);
+      path.lineTo(sx - s * 0.35, sy + s * 0.35);
+      path.lineTo(sx - s, sy);
+      path.lineTo(sx - s * 0.35, sy - s * 0.35);
       path.closePath();
       break;
+    }
     case "can":
       path.rect(-size * 0.28, -size * 0.4, size * 0.56, size * 0.8);
       path.ellipse(0, -size * 0.4, size * 0.28, size * 0.08, 0, 0, Math.PI * 2);
