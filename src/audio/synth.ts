@@ -175,6 +175,84 @@ export function playSlip(synth: Synth): void {
   osc.stop(now + durationSec);
 }
 
+// Epic section 10: sine 120 -> 50 Hz, 80ms. Fires on every beat landing in
+// Follow the Rhythm - lead-in or judged, hit or miss - it's the game's
+// pulse, not a judgement, and partners the visible beat-flash so muted play
+// still has a felt rhythm via the ball's arc alone.
+export function playRhythmBeat(synth: Synth): void {
+  if (!synth.ctx || !synth.master) return;
+  const ctx = synth.ctx;
+  const master = synth.master;
+  const now = ctx.currentTime;
+  const durationSec = 0.08;
+
+  const osc = ctx.createOscillator();
+  osc.type = "sine";
+  osc.frequency.setValueAtTime(120, now);
+  osc.frequency.exponentialRampToValueAtTime(50, now + durationSec);
+
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0.2, now);
+  gain.gain.linearRampToValueAtTime(0.0001, now + durationSec);
+
+  osc.connect(gain);
+  gain.connect(master);
+  osc.start(now);
+  osc.stop(now + durationSec);
+}
+
+// Epic section 10: square 660 Hz, 60ms. Fires on a Rhythm tap that lands
+// inside the hit window.
+export function playRhythmHit(synth: Synth): void {
+  if (!synth.ctx || !synth.master) return;
+  const ctx = synth.ctx;
+  const master = synth.master;
+  const now = ctx.currentTime;
+  const durationSec = 0.06;
+
+  const osc = ctx.createOscillator();
+  osc.type = "square";
+  osc.frequency.value = 660;
+
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0.2, now);
+  gain.gain.linearRampToValueAtTime(0.0001, now + durationSec);
+
+  osc.connect(gain);
+  gain.connect(master);
+  osc.start(now);
+  osc.stop(now + durationSec);
+}
+
+// Epic section 10: white noise 80ms, lowpass 300 Hz. Fires on a mistimed
+// Rhythm tap - the epic requires this to read as unmistakably different
+// from a hit within two beats.
+export function playRhythmThud(synth: Synth): void {
+  if (!synth.ctx || !synth.master) return;
+  const ctx = synth.ctx;
+  const master = synth.master;
+  const now = ctx.currentTime;
+  const durationSec = 0.08;
+
+  const buffer = noiseBuffer(ctx, durationSec);
+  const source = ctx.createBufferSource();
+  source.buffer = buffer;
+
+  const filter = ctx.createBiquadFilter();
+  filter.type = "lowpass";
+  filter.frequency.value = 300;
+
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0.2, now);
+  gain.gain.linearRampToValueAtTime(0.0001, now + durationSec);
+
+  source.connect(filter);
+  filter.connect(gain);
+  gain.connect(master);
+  source.start(now);
+  source.stop(now + durationSec);
+}
+
 function noiseBuffer(ctx: AudioContext, durationSec: number): AudioBuffer {
   const length = Math.max(1, Math.floor(ctx.sampleRate * durationSec));
   const buffer = ctx.createBuffer(1, length, ctx.sampleRate);

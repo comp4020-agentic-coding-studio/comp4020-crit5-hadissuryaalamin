@@ -16,6 +16,9 @@ import {
   playCanJolt,
   playCanLaunch,
   playClimbStep,
+  playRhythmBeat,
+  playRhythmHit,
+  playRhythmThud,
   playSlip,
   playTransitionSting,
   setMuted,
@@ -23,11 +26,13 @@ import {
 import { createOhNo, tapOhNo, tickOhNo, type OhNoState } from "./game/ohno.ts";
 import { createShake, tapShake, tickShake, type ShakeState } from "./game/shake.ts";
 import { createClimber, tapClimber, tickClimber, type ClimberState } from "./game/climber.ts";
-import { OHNO_LAPS, SHAKE_LAPS, CLIMBER_LAPS } from "./game/laps.ts";
+import { createRhythm, tapRhythm, tickRhythm, type RhythmState } from "./game/rhythm.ts";
+import { OHNO_LAPS, SHAKE_LAPS, CLIMBER_LAPS, RHYTHM_LAPS } from "./game/laps.ts";
 import { mulberry32, type Rng } from "./game/rng.ts";
 import { drawOhno } from "./render/scenes/ohno.ts";
 import { drawShake, LAUNCH_MS as SHAKE_LAUNCH_MS } from "./render/scenes/shake.ts";
 import { drawClimber } from "./render/scenes/climber.ts";
+import { drawRhythm } from "./render/scenes/rhythm.ts";
 import { drawAttract, type AttractState } from "./render/scenes/attract.ts";
 import { drawTransition, TRANSITION_DURATION_MS, TRANSITION_STING_MS } from "./render/scenes/transition.ts";
 
@@ -47,6 +52,7 @@ let shakeSeed = 0;
 let climber: ClimberState = createClimber();
 let climberSeed = 0;
 let climberRng: Rng = mulberry32(0);
+let rhythm: RhythmState = createRhythm();
 let resultElapsedMs = 0;
 
 const attractState: AttractState = { seed: Math.floor(Math.random() * 0xffffffff), elapsedMs: 0, pressElapsedMs: null };
@@ -77,6 +83,8 @@ function enterCurrentRound(): void {
     climber = createClimber();
     climberSeed = Math.floor(Math.random() * 0xffffffff);
     climberRng = mulberry32(Math.floor(Math.random() * 0xffffffff));
+  } else if (round === "rhythm") {
+    rhythm = createRhythm();
   }
 }
 
@@ -111,6 +119,10 @@ function handleTap(): void {
   } else if (round === "shake") {
     if (shake.status === "playing") playCanJolt(synth);
     shake = tapShake(shake, SHAKE_LAPS[gauntlet.lap]);
+  } else if (round === "rhythm") {
+    rhythm = tapRhythm(rhythm, RHYTHM_LAPS[gauntlet.lap]);
+    if (rhythm.lastEvent === "hit") playRhythmHit(synth);
+    else if (rhythm.lastEvent === "miss") playRhythmThud(synth);
   }
 }
 
@@ -136,9 +148,6 @@ attachInput(canvas, {
 
 window.addEventListener("resize", () => resizeStage(stage));
 
-// Only Oh No, Shake and Climber have real gameplay yet (task 006 adds
-// Rhythm); the incoming scene preview during a wipe/transition is a no-op
-// for any other round.
 function drawIncomingRoundStatic(): void {
   const round = currentRound(gauntlet);
   if (round === "ohno") {
@@ -147,6 +156,8 @@ function drawIncomingRoundStatic(): void {
     drawShake(stage, createShake(), SHAKE_LAPS[gauntlet.lap], transitionSeed, 0);
   } else if (round === "climber") {
     drawClimber(stage, createClimber(), CLIMBER_LAPS[gauntlet.lap], transitionSeed, 0);
+  } else if (round === "rhythm") {
+    drawRhythm(stage, createRhythm(), RHYTHM_LAPS[gauntlet.lap], 0);
   }
 }
 
@@ -220,9 +231,23 @@ function frame(now: number): void {
     }
   }
 
+  if (gauntlet.phase === "round" && currentRound(gauntlet) === "rhythm") {
+    const beatPeriod = 60 / RHYTHM_LAPS[gauntlet.lap].bpm;
+    const beforeBeatIndex = Math.floor(rhythm.elapsed / beatPeriod);
+    rhythm = tickRhythm(rhythm, RHYTHM_LAPS[gauntlet.lap], dt);
+    const afterBeatIndex = Math.floor(rhythm.elapsed / beatPeriod);
+    if (afterBeatIndex > beforeBeatIndex) playRhythmBeat(synth);
+    if (rhythm.status === "cleared") {
+      gauntlet = roundCleared(gauntlet);
+      if (gauntlet.phase === "transition") beginTransition();
+    } else if (rhythm.status === "lost") {
+      gauntlet = roundLost(gauntlet);
+    }
+  }
+
   if (
     gauntlet.phase === "dead" &&
-    (ohno.status === "lost" || shake.status === "lost" || climber.status === "lost")
+    (ohno.status === "lost" || shake.status === "lost" || climber.status === "lost" || rhythm.status === "lost")
   ) {
     resultElapsedMs += dtMs;
   }
@@ -256,6 +281,11 @@ function frame(now: number): void {
     currentRound(gauntlet) === "climber"
   ) {
     drawClimber(stage, climber, CLIMBER_LAPS[gauntlet.lap], climberSeed, resultElapsedMs);
+  } else if (
+    (gauntlet.phase === "round" || gauntlet.phase === "dead") &&
+    currentRound(gauntlet) === "rhythm"
+  ) {
+    drawRhythm(stage, rhythm, RHYTHM_LAPS[gauntlet.lap], resultElapsedMs);
   }
 
   requestAnimationFrame(frame);

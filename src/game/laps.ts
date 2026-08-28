@@ -1,6 +1,7 @@
 import type { OhNoConfig } from "./ohno.ts";
 import type { ShakeConfig } from "./shake.ts";
 import type { ClimberConfig } from "./climber.ts";
+import type { RhythmConfig } from "./rhythm.ts";
 
 export const LAP_COUNT = 3;
 
@@ -63,4 +64,12 @@ export const CLIMBER_LAPS: Record<Lap, ClimberConfig> = {
   1: { floors: 20, timerSeconds: 10.0, stunSeconds: 0.35, slipFloors: 1, doubleChance: 0.0 },
   2: { floors: 26, timerSeconds: 10.0, stunSeconds: 0.35, slipFloors: 1, doubleChance: 0.2 },
   3: { floors: 32, timerSeconds: 10.0, stunSeconds: 0.35, slipFloors: 1, doubleChance: 0.3 },
+};
+
+// Epic section 11.4. Rhythm is the last round of a lap, so clearing it on
+// lap 3 is what wins the run (handled generically by gauntlet.roundCleared).
+export const RHYTHM_LAPS: Record<Lap, RhythmConfig> = {
+  1: { bpm: 100, beats: 16, leadInBeats: 4, hitWindowMs: 150, maxMisses: 5 },
+  2: { bpm: 120, beats: 20, leadInBeats: 2, hitWindowMs: 110, maxMisses: 4 },
+  3: { bpm: 140, beats: 24, leadInBeats: 2, hitWindowMs: 80, maxMisses: 3 },
 };
