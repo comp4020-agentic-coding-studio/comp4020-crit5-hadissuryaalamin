@@ -47,10 +47,18 @@ import { PAD_BAND_FRACTION, PAD_COLORS } from "../pads.ts";
 // audio alone. The pitches in src/audio/synth.ts are a second channel, never
 // the only one.
 
-const KANGA_HEIGHT_U = 30;
+// Sized from screenshots, not from arithmetic. The rig takes its outline
+// weight from the STAGE unit, so a figure drawn much smaller than stage scale
+// gets an outline nearly as wide as its own body: at the first pass's 15
+// scene-units the three racers rendered as near-solid ink blobs at 900x700,
+// which is the same "black blobs" failure task 015 hit from the other
+// direction. 19 units leaves roughly 36px of a racer's own colour inside a
+// 15px outline at that viewport, and the cast now lands at about the same
+// on-screen height (~138px) at both marking viewports.
+const KANGA_HEIGHT_U = 25;
 const KANGA_COLOR = "#D9A05B";
-const RACER_HEIGHT_U = 15;
-const DRUM_R_U = 5.2;
+const RACER_HEIGHT_U = 19;
+const DRUM_R_U = 4.6;
 
 const CHIP_R_U = 1.5;
 const CHIP_GAP_U = 4.0;
@@ -75,9 +83,10 @@ const SEAT_FIRST = 0.18;
 const SEAT_GAP = 0.32;
 // Widest thing a seat holds: a racer with arms out, plus their drum.
 const SEAT_FOOTPRINT_U = 46 / 3;
-// Ground margin + racer + their chips + gap + the kangaroo's full reach.
-const STACK_U = 70;
-const MAX_SCENE_SCALE = 1.7;
+// Ground margin + racer + their chips + the kangaroo's full reach (its ears
+// and its cymbals at the top of the swing, not just its standing height).
+const STACK_U = 78;
+const MAX_SCENE_SCALE = 1.85;
 
 export function patternTurnPulse(elapsedMs: number): number {
   return 0.5 + 0.5 * Math.sin((elapsedMs / 1000 / TURN_PULSE_PERIOD_SEC) * Math.PI * 2);
@@ -103,11 +112,14 @@ function layout(stage: Stage): Layout {
   const { width, height, u } = stage;
   const playBottom = height * (1 - PAD_BAND_FRACTION);
   const s = Math.min((width * SEAT_GAP) / SEAT_FOOTPRINT_U, playBottom / STACK_U, u * MAX_SCENE_SCALE);
-  const racerFeetY = playBottom - 4 * s;
+  const racerFeetY = playBottom - 6 * s;
   return {
     s,
     racerFeetY,
-    kangarooFeetY: racerFeetY - 24 * s,
+    // Far enough above the racers that the game master's chip row and theirs
+    // cannot be mistaken for one another - they sit either side of the dais,
+    // which is the visual break between the two.
+    kangarooFeetY: racerFeetY - 31 * s,
     seatX: (i: number) => width * (SEAT_FIRST + i * SEAT_GAP),
     centreX: width * 0.5,
   };
@@ -128,13 +140,18 @@ export function drawPattern(
 
   drawBunting(stage, seed, palette.accent, l.s);
   if (lit !== null) drawColourFlood(stage, l, PAD_COLORS[lit], state, config);
-  drawDais(stage, l, palette.pop, seed);
 
+  // The dais goes on AFTER the game master, not before. Screenshotted the
+  // other way round first: with the dais behind, the rig's own foot blobs sat
+  // proud below the tunic on a thin dark bar and the whole thing read as a
+  // kangaroo on a skateboard. Drawn in front, the dais front face covers the
+  // feet and the root of the tail, and it reads as a stage.
   drawKangaroo(stage, state, config, l, seed, palette.primary, lit);
+  drawDais(stage, l, palette.pop, seed);
   drawChipRow(
     stage,
     l.centreX,
-    l.kangarooFeetY + 5.5 * l.s,
+    l.kangarooFeetY + 2.0 * l.s,
     state.pattern.length,
     (i) => (state.phase === "demo" && i < state.demoIndex ? PAD_COLORS[state.pattern[i]] : null),
     () => false,
@@ -195,10 +212,12 @@ function drawBunting(stage: Stage, seed: number, color: string, s: number): void
 // three racers rather than one of them.
 function drawDais(stage: Stage, l: Layout, color: string, seed: number): void {
   const { ctx, width } = stage;
-  const w = Math.min(width * 0.62, 44 * l.s);
-  const h = 3.6 * l.s;
+  const w = Math.min(width * 0.7, 46 * l.s);
+  const h = 5.4 * l.s;
   const x = l.centreX - w / 2;
-  const y = l.kangarooFeetY;
+  // Top edge sits slightly ABOVE the game master's feet, so the feet are
+  // behind the stage front rather than dangling under it.
+  const y = l.kangarooFeetY - 1.4 * l.s;
 
   const path = new Path2D();
   path.rect(x, y, w, h);
@@ -230,9 +249,9 @@ function drawColourFlood(
   // as a hit; a slow bloom reads as ambient animation, which is banned.
   const grow = Math.min(1, since / 60);
   const fade = 1 - Math.max(0, (since - litMs * 0.55) / (litMs * 0.45));
-  const r = (16 + 10 * grow) * l.s;
+  const r = (13 + 7 * grow) * l.s;
   const cx = l.centreX;
-  const cy = l.kangarooFeetY - 20 * l.s;
+  const cy = l.kangarooFeetY - 17 * l.s;
 
   ctx.save();
   const disc = new Path2D();
@@ -337,13 +356,19 @@ function drawKangaroo(
     armReach: arms.reach,
   };
 
+  // Rays BEHIND the figure, cymbals in front of it. Screenshotted with the
+  // rays on top first: eight paper spikes drew straight through the game
+  // master's face, which is the same mistake task 015 made by putting the
+  // explosion in front of the racer whose reaction it existed to show.
+  const hands = handPositions(stage, spec);
+  if (impact > 0.05) {
+    drawClangRays(stage, (hands.left.x + hands.right.x) / 2, (hands.left.y + hands.right.y) / 2, l.s, impact);
+  }
   drawCharacter(stage, spec);
 
-  const hands = handPositions(stage, spec);
   const cymbalColor = lit === null ? tunicIdle : PAD_COLORS[lit as 0 | 1 | 2 | 3];
   drawCymbal(stage, hands.left.x, hands.left.y, l.s, -1, cymbalColor, impact);
   drawCymbal(stage, hands.right.x, hands.right.y, l.s, 1, cymbalColor, impact);
-  if (impact > 0.05) drawClangRays(stage, (hands.left.x + hands.right.x) / 2, (hands.left.y + hands.right.y) / 2, l.s, impact);
 }
 
 function drawCymbal(
@@ -428,7 +453,7 @@ function drawRacer(
   const slumped = r.eliminated
     ? Math.min(1, msSince(r.eliminatedAtMs, state.elapsedMs + resolveMs) / SLUMP_MS)
     : 0;
-  const lean = slumped * 24 * (index === 2 ? -1 : 1);
+  const lean = slumped * 34 * (index === 2 ? -1 : 1);
 
   ctx.save();
   ctx.translate(cx, feetY);
@@ -453,7 +478,7 @@ function drawRacer(
   drawChipRow(
     stage,
     cx,
-    feetY - (RACER_HEIGHT_U + 4.5) * l.s,
+    feetY - (RACER_HEIGHT_U + 2.2) * l.s,
     state.pattern.length,
     (i) => (i < r.step ? PAD_COLORS[state.pattern[i]] : null),
     (i) => r.eliminated && i === r.step,
@@ -559,7 +584,7 @@ function drawChipRow(
     const chip = new Path2D();
     chip.arc(x, cy, CHIP_R_U * s, 0, Math.PI * 2);
     ctx.fillStyle = color ?? PAPER;
-    ctx.globalAlpha = color ? 1 : 0.3;
+    ctx.globalAlpha = color ? 1 : 0.45;
     ctx.fill(chip);
     ctx.globalAlpha = 1;
     wonkyStroke(ctx, chip, Math.max(2, 0.4 * s), { dx: 0.15 * s, dy: 0.15 * s });
