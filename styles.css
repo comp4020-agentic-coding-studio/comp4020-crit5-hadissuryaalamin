@@ -1,16 +1,71 @@
+:root {
+  --u: min(1vw, 1vh);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
 body {
   margin: 0;
-  padding: 2rem;
-  font-family: system-ui, sans-serif;
-  line-height: 1.6;
-  color: #1a1a1a;
+  padding: 0;
+  overflow: hidden;
+  background: #14100e;
+  font-family: "Arial Black", "Helvetica Neue", Impact, system-ui, sans-serif;
 }
 
-main {
-  max-width: 40rem;
-  margin: 0 auto;
+body {
+  touch-action: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
-a {
-  color: #0b5fff;
+canvas#stage {
+  display: block;
+  width: 100vw;
+  height: 100vh;
+  touch-action: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  clip-path: inset(50%);
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+nav[aria-label="Sound"] {
+  position: fixed;
+  top: calc(2 * var(--u));
+  right: calc(2 * var(--u));
+  z-index: 10;
+}
+
+#mute {
+  width: calc(8 * var(--u));
+  height: calc(8 * var(--u));
+  min-width: 32px;
+  min-height: 32px;
+  border-radius: 50%;
+  border: calc(1.2 * var(--u)) solid #14100e;
+  background: #fff6e5;
+  color: #14100e;
+  box-shadow: calc(0.9 * var(--u)) calc(1.1 * var(--u)) 0 #14100e;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+}
+
+#mute[aria-pressed="true"] {
+  color: #a9a29a;
 }
