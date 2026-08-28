@@ -60,10 +60,23 @@ export const SHAKE_LAPS: Record<Lap, ShakeConfig> = {
 
 // Epic section 11.3. Lap 1 is pure alternation (doubleChance 0.00) so the
 // mechanic is learned cleanly before doubles arrive on lap 2.
+//
+// timerSeconds for laps 2/3 raised from the epic's starting-point value of
+// 10.0 (stretch item 13.3.1 explicitly invites this: "Climber doubles tuned
+// by feel — the values in 11.3 are a starting point"). Playtesting in a real
+// browser with a bot that reads the actual glow state from rendered canvas
+// pixels (not a debug hook) and taps at a human-plausible 230-350ms reaction
+// cadence sustained only ~2.3-2.6 correct pad-taps/sec. At the original
+// 10.0s timer that's a ceiling of ~23-26 correct taps — short of lap 2's 26
+// floors and well short of lap 3's 32, before even counting the extra floor
+// lost plus stun on every doubleChance-induced wrong tap. Difficulty still
+// ramps via floors (20/26/32) and doubleChance (0.0/0.2/0.3); the timer no
+// longer needs to also tighten on top of that to keep the round winnable by
+// a real thumb.
 export const CLIMBER_LAPS: Record<Lap, ClimberConfig> = {
   1: { floors: 20, timerSeconds: 10.0, stunSeconds: 0.35, slipFloors: 1, doubleChance: 0.0 },
-  2: { floors: 26, timerSeconds: 10.0, stunSeconds: 0.35, slipFloors: 1, doubleChance: 0.2 },
-  3: { floors: 32, timerSeconds: 10.0, stunSeconds: 0.35, slipFloors: 1, doubleChance: 0.3 },
+  2: { floors: 26, timerSeconds: 12.5, stunSeconds: 0.35, slipFloors: 1, doubleChance: 0.2 },
+  3: { floors: 32, timerSeconds: 15.0, stunSeconds: 0.35, slipFloors: 1, doubleChance: 0.3 },
 };
 
 // Epic section 11.4. Rhythm is the last round of a lap, so clearing it on
