@@ -210,9 +210,9 @@ export function playCanLaunch(synth: Synth): void {
 }
 
 // Epic section 10: square alternating 330 Hz / 392 Hz, 50ms. Fires on every
-// correct Climber tap - the alternation doubles as the audio for the
-// alternating pads (330 on a left-pad step, 392 on a right-pad step).
-export function playClimbStep(synth: Synth, side: "LEFT" | "RIGHT"): void {
+// correct Climber tap - v2 widens Climber to 4 pads, so the alternation is
+// now keyed off the tapped pad's parity rather than a LEFT/RIGHT side.
+export function playClimbStep(synth: Synth, padIndex: 0 | 1 | 2 | 3): void {
   if (!synth.ctx || !synth.master) return;
   const ctx = synth.ctx;
   const master = synth.master;
@@ -221,7 +221,7 @@ export function playClimbStep(synth: Synth, side: "LEFT" | "RIGHT"): void {
 
   const osc = ctx.createOscillator();
   osc.type = "square";
-  osc.frequency.value = side === "LEFT" ? 330 : 392;
+  osc.frequency.value = padIndex % 2 === 0 ? 330 : 392;
 
   const gain = ctx.createGain();
   gain.gain.setValueAtTime(0.2, now);

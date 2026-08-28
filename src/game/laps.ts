@@ -7,9 +7,11 @@ export const LAP_COUNT = 3;
 
 export type RoundId = "ohno" | "shake" | "climber" | "rhythm";
 
-// Easiest first, per the confirmed round order — also the play order for
-// every lap.
-export const ROUND_ORDER: RoundId[] = ["ohno", "shake", "climber", "rhythm"];
+// Easiest first, per the CONFIRMED v2 round order (epic section 6) — also
+// the play order for every lap. Reordered from v1: the bomb game (Oh No) now
+// involves reading a pulsing pad under time pressure and is no longer the
+// gentlest opener; the can is.
+export const ROUND_ORDER: RoundId[] = ["shake", "climber", "ohno", "rhythm"];
 
 export type Lap = 1 | 2 | 3;
 

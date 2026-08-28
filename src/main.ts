@@ -15,13 +15,23 @@ import {
   ensureAudioContext,
   playCanJolt,
   playCanLaunch,
+  playClimbStep,
+  playSlip,
   playTapBlip,
   playWinChord,
   setMuted,
 } from "./audio/synth.ts";
 import { CPU_LAPS, createCpuTimer, tickCpuTimer, type CpuTimerState } from "./game/cpu.ts";
 import { createCan, resolveCanPlacing, tapCan, tickCan, type CanState } from "./game/can.ts";
-import { CAN_LAPS } from "./game/laps.ts";
+import {
+  createClimber,
+  resolveClimberPlacing,
+  tapClimber,
+  tickClimber,
+  wrongPad,
+  type ClimberState,
+} from "./game/climber.ts";
+import { CAN_LAPS, CLIMBER_LAPS } from "./game/laps.ts";
 import { mulberry32, type Rng } from "./game/rng.ts";
 import type { Place, Placing } from "./game/types.ts";
 import { drawAttract, type AttractState } from "./render/scenes/attract.ts";
@@ -29,16 +39,24 @@ import { drawTransition, TRANSITION_DURATION_MS, TRANSITION_STING_MS } from "./r
 import { drawDeadFurniture, drawWinBurst, WIN_BURST_MS } from "./render/scenes/dead.ts";
 import { drawPodium, PODIUM_DURATION_MS } from "./render/scenes/podium.ts";
 import { drawCan } from "./render/scenes/can.ts";
-import { createPadPressState, drawFourPads, pressPad, tickPadPress, type PadPressState } from "./render/pads.ts";
+import { climberGlowPulse, drawClimber } from "./render/scenes/climber.ts";
+import {
+  createPadPressState,
+  drawFourPads,
+  pressPad,
+  tickPadPress,
+  type PadGlow,
+  type PadPressState,
+} from "./render/pads.ts";
 import { drawCharacter, neutralPose, squashPose } from "./render/character.ts";
 
 // v2 rebuild step 2 (epic build-order) wired the gauntlet's phase machine to
 // resolve every round to a 3-racer placing via a podium screen, instead of a
-// solo cleared/lost status. Step 3 (this file's Shake wiring) replaces the
-// THROWAWAY "first to N pad taps wins" race with the real Shake the Can
-// microgame — but only for round id "shake". Oh No / Climber / Rhythm are
-// rebuilt in tasks 015/014/016 respectively and still run on the throwaway
-// round in the meantime; the two code paths below are branched on
+// solo cleared/lost status. Step 3 (Shake) and step 4 (this file's Climber
+// wiring) each replace the THROWAWAY "first to N pad taps wins" race with a
+// real microgame — but only for their own round id. Oh No / Rhythm are
+// rebuilt in tasks 015/016 respectively and still run on the throwaway
+// round in the meantime; the code paths below are branched on
 // currentRound(gauntlet) so real and not-yet-rebuilt rounds can coexist.
 
 const THROWAWAY_TARGET_TAPS = 15;
@@ -85,6 +103,20 @@ let canCpuTimers: [CpuTimerState, CpuTimerState] = [
 ];
 let canCpuRng: Rng = mulberry32(5);
 
+// Building Climber state - reset in enterCurrentRound(). `climberRng` drives
+// the rule module's own randomness (which pad the glow jumps to, and the
+// doubles roll); `climberCpuRng` is separate so a CPU racer's error rolls
+// can't shift the glow sequence the human is reading. `climberSeed` is the
+// scene's stable per-round jitter seed for the tower.
+let climberState: ClimberState = createClimber(mulberry32(6));
+let climberRng: Rng = mulberry32(7);
+let climberCpuRng: Rng = mulberry32(8);
+let climberSeed = 0;
+let climberCpuTimers: [CpuTimerState, CpuTimerState] = [
+  createCpuTimer(CPU_LAPS[1], mulberry32(9)),
+  createCpuTimer(CPU_LAPS[1], mulberry32(10)),
+];
+
 function syncMuteButton(): void {
   muteButton.setAttribute("aria-pressed", String(synth.muted));
 }
@@ -127,6 +159,15 @@ function enterCurrentRound(): void {
     createCpuTimer(CPU_LAPS[gauntlet.lap], mulberry32(canSeed ^ 0x27d4eb2f)),
     createCpuTimer(CPU_LAPS[gauntlet.lap], mulberry32(canSeed ^ 0x165667b1)),
   ];
+
+  climberSeed = Math.floor(Math.random() * 0xffffffff);
+  climberRng = mulberry32(climberSeed);
+  climberState = createClimber(climberRng);
+  climberCpuRng = mulberry32(climberSeed ^ 0x2545f491);
+  climberCpuTimers = [
+    createCpuTimer(CPU_LAPS[gauntlet.lap], mulberry32(climberSeed ^ 0x6c078965)),
+    createCpuTimer(CPU_LAPS[gauntlet.lap], mulberry32(climberSeed ^ 0x1b873593)),
+  ];
 }
 
 function beginTransition(): void {
@@ -166,6 +207,20 @@ function handlePad(padIndex: 0 | 1 | 2 | 3): void {
     if (canState.status !== "playing") return;
     canState = tapCan(canState, 0, padIndex, CAN_LAPS[gauntlet.lap]);
     playCanJolt(synth);
+    return;
+  }
+
+  if (currentRound(gauntlet) === "climber") {
+    if (climberState.status !== "playing") return;
+    const before = climberState.racers[0];
+    // A tap the rule module will ignore anyway (already on the roof, or still
+    // stunned) gets no sound either - silence IS the readout that the stun is
+    // still running.
+    if (before.finishOrder !== null || before.stunRemaining > 0) return;
+    const correct = padIndex === before.expectedPad;
+    climberState = tapClimber(climberState, 0, padIndex, CLIMBER_LAPS[gauntlet.lap], climberRng);
+    if (correct) playClimbStep(synth, padIndex);
+    else playSlip(synth);
     return;
   }
 
@@ -272,6 +327,30 @@ function frame(now: number): void {
       gauntlet = roundResolved(gauntlet, placing);
       podiumElapsedMs = 0;
     }
+  } else if (gauntlet.phase === "round" && currentRound(gauntlet) === "climber") {
+    const config = CLIMBER_LAPS[gauntlet.lap];
+    const cpuConfig = CPU_LAPS[gauntlet.lap];
+    for (const racerId of [1, 2] as const) {
+      const tick = tickCpuTimer(climberCpuTimers[racerId - 1], cpuConfig, dtMs, climberCpuRng);
+      climberCpuTimers[racerId - 1] = tick.timer;
+      if (!tick.acted) continue;
+      // A CPU error in Climber reads as hitting a pad that is NOT glowing -
+      // the same slip + stun the human gets, which is what makes a rival
+      // visibly fallible rather than a wall (epic section 5).
+      const padIndex = tick.errored
+        ? wrongPad(climberState, racerId, climberCpuRng)
+        : climberState.racers[racerId].expectedPad;
+      climberState = tapClimber(climberState, racerId, padIndex, config, climberRng);
+    }
+
+    climberState = tickClimber(climberState, config, dt);
+    // Checked after the tick rather than against a pre-tick snapshot: unlike
+    // Shake, Climber can also resolve inside tapClimber (the third racer
+    // reaching the roof), including from a human tap between frames.
+    if (climberState.status === "resolved") {
+      gauntlet = roundResolved(gauntlet, resolveClimberPlacing(climberState));
+      podiumElapsedMs = 0;
+    }
   } else if (gauntlet.phase === "round") {
     throwawayElapsedMs += dtMs;
     const cpuConfig = CPU_LAPS[gauntlet.lap];
@@ -325,6 +404,17 @@ function frame(now: number): void {
   } else if (gauntlet.phase === "round" && currentRound(gauntlet) === "shake") {
     drawCan(stage, canState, CAN_LAPS[gauntlet.lap], gauntlet.racers);
     drawFourPads(stage, padPressState);
+  } else if (gauntlet.phase === "round" && currentRound(gauntlet) === "climber") {
+    drawClimber(stage, climberState, CLIMBER_LAPS[gauntlet.lap], gauntlet.racers, climberSeed);
+    // The human's own glowing pad, repeated at the bottom of the screen in
+    // the same colour and on the same pulse phase as the ring over their
+    // climber's head - one signal, stated twice, which is the whole lesson.
+    const human = climberState.racers[0];
+    const glow: PadGlow | null =
+      human.finishOrder === null
+        ? { index: human.expectedPad, pulse: climberGlowPulse(climberState.elapsedMs) }
+        : null;
+    drawFourPads(stage, padPressState, glow);
   } else if (gauntlet.phase === "round") {
     drawThrowawayRound();
   } else if (gauntlet.phase === "podium" && gauntlet.lastPlacing) {
