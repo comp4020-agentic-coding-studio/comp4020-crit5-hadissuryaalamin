@@ -1,5 +1,5 @@
 import type { OhNoConfig } from "./ohno.ts";
-import type { ShakeConfig } from "./shake.ts";
+import type { CanConfig } from "./can.ts";
 import type { ClimberConfig } from "./climber.ts";
 import type { RhythmConfig } from "./rhythm.ts";
 
@@ -49,13 +49,17 @@ export const OHNO_LAPS: Record<Lap, OhNoConfig> = {
   },
 };
 
-// Epic section 11.2. Decay only applies once idleGrace has passed since the
-// last tap, so steady mashing is never punished by arithmetic - only
-// stopping costs you.
-export const SHAKE_LAPS: Record<Lap, ShakeConfig> = {
-  1: { tapGain: 0.03, decayPerSec: 0.05, idleGrace: 0.35, timerSeconds: 10.0 },
-  2: { tapGain: 0.024, decayPerSec: 0.08, idleGrace: 0.35, timerSeconds: 9.0 },
-  3: { tapGain: 0.022, decayPerSec: 0.12, idleGrace: 0.35, timerSeconds: 8.5 },
+// v2 epic section 7.1 (CONFIRMED: fixed-length contest, not first-to-full) —
+// starting points, to be tuned from actual 3-racer play per section 7.5. A
+// hit on a pad different from the racer's last one earns altGain; repeating
+// the same pad earns the smaller sameGain, rewarding the alternation the
+// four-pad surface is built for. Sized against src/game/cpu.ts's per-lap
+// reaction times so a human alternating across all four pads clearly outpaces
+// a CPU racer, while one who just hammers a single pad is a much closer race.
+export const CAN_LAPS: Record<Lap, CanConfig> = {
+  1: { altGain: 0.05, sameGain: 0.02, shakeSeconds: 8.0 },
+  2: { altGain: 0.045, sameGain: 0.018, shakeSeconds: 7.0 },
+  3: { altGain: 0.04, sameGain: 0.016, shakeSeconds: 6.0 },
 };
 
 // Epic section 11.3. Lap 1 is pure alternation (doubleChance 0.00) so the

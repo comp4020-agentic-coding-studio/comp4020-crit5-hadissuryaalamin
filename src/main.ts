@@ -10,23 +10,36 @@ import {
   type GauntletState,
 } from "./game/gauntlet.ts";
 import { attachInput } from "./input/input.ts";
-import { createSynth, ensureAudioContext, playTapBlip, playWinChord, setMuted } from "./audio/synth.ts";
+import {
+  createSynth,
+  ensureAudioContext,
+  playCanJolt,
+  playCanLaunch,
+  playTapBlip,
+  playWinChord,
+  setMuted,
+} from "./audio/synth.ts";
 import { CPU_LAPS, createCpuTimer, tickCpuTimer, type CpuTimerState } from "./game/cpu.ts";
+import { createCan, resolveCanPlacing, tapCan, tickCan, type CanState } from "./game/can.ts";
+import { CAN_LAPS } from "./game/laps.ts";
 import { mulberry32, type Rng } from "./game/rng.ts";
 import type { Place, Placing } from "./game/types.ts";
 import { drawAttract, type AttractState } from "./render/scenes/attract.ts";
 import { drawTransition, TRANSITION_DURATION_MS, TRANSITION_STING_MS } from "./render/scenes/transition.ts";
 import { drawDeadFurniture, drawWinBurst, WIN_BURST_MS } from "./render/scenes/dead.ts";
 import { drawPodium, PODIUM_DURATION_MS } from "./render/scenes/podium.ts";
+import { drawCan } from "./render/scenes/can.ts";
 import { createPadPressState, drawFourPads, pressPad, tickPadPress, type PadPressState } from "./render/pads.ts";
 import { drawCharacter, neutralPose, squashPose } from "./render/character.ts";
 
-// v2 rebuild step 2 (epic build-order): the gauntlet's phase machine now
-// resolves every round to a 3-racer placing via a podium screen, instead of a
-// solo cleared/lost status. The round content below is a THROWAWAY "first to
-// N pad taps wins" race — proof that attract -> transition -> round -> podium
-// -> next/dead/won is real end to end with 1 human + 2 CPU racers. It is not
-// a real microgame and is replaced entirely by task 013 (Shake the Can).
+// v2 rebuild step 2 (epic build-order) wired the gauntlet's phase machine to
+// resolve every round to a 3-racer placing via a podium screen, instead of a
+// solo cleared/lost status. Step 3 (this file's Shake wiring) replaces the
+// THROWAWAY "first to N pad taps wins" race with the real Shake the Can
+// microgame — but only for round id "shake". Oh No / Climber / Rhythm are
+// rebuilt in tasks 015/014/016 respectively and still run on the throwaway
+// round in the meantime; the two code paths below are branched on
+// currentRound(gauntlet) so real and not-yet-rebuilt rounds can coexist.
 
 const THROWAWAY_TARGET_TAPS = 15;
 const THROWAWAY_TIMEOUT_MS = 20_000;
@@ -50,7 +63,7 @@ let transitionStingFired = false;
 
 let padPressState: PadPressState = createPadPressState();
 
-// Throwaway round state — reset in enterCurrentRound().
+// Throwaway round state (rounds not yet rebuilt) — reset in enterCurrentRound().
 let throwawayTaps: [number, number, number] = [0, 0, 0];
 let throwawayFinishOrder: [number | null, number | null, number | null] = [null, null, null];
 let throwawayFinishedCount = 0;
@@ -60,6 +73,17 @@ let throwawayCpuTimers: [CpuTimerState, CpuTimerState] = [
   createCpuTimer(CPU_LAPS[1], mulberry32(2)),
 ];
 let throwawayRng: Rng = mulberry32(0);
+
+// Shake the Can state — reset in enterCurrentRound(). CPU racers always
+// alternate through all four pads in a fixed cycle (guaranteeing altGain
+// whenever they don't error), which is enough to make them a real contest
+// without needing pad-reading logic of their own.
+let canState: CanState = createCan();
+let canCpuTimers: [CpuTimerState, CpuTimerState] = [
+  createCpuTimer(CPU_LAPS[1], mulberry32(3)),
+  createCpuTimer(CPU_LAPS[1], mulberry32(4)),
+];
+let canCpuRng: Rng = mulberry32(5);
 
 function syncMuteButton(): void {
   muteButton.setAttribute("aria-pressed", String(synth.muted));
@@ -95,6 +119,14 @@ function enterCurrentRound(): void {
     createCpuTimer(CPU_LAPS[gauntlet.lap], mulberry32(seed ^ 0x9e3779b9)),
     createCpuTimer(CPU_LAPS[gauntlet.lap], mulberry32(seed ^ 0x85ebca6b)),
   ];
+
+  canState = createCan();
+  const canSeed = Math.floor(Math.random() * 0xffffffff);
+  canCpuRng = mulberry32(canSeed);
+  canCpuTimers = [
+    createCpuTimer(CPU_LAPS[gauntlet.lap], mulberry32(canSeed ^ 0x27d4eb2f)),
+    createCpuTimer(CPU_LAPS[gauntlet.lap], mulberry32(canSeed ^ 0x165667b1)),
+  ];
 }
 
 function beginTransition(): void {
@@ -129,8 +161,15 @@ function handlePad(padIndex: 0 | 1 | 2 | 3): void {
   padPressState = pressPad(padPressState, padIndex);
 
   if (gauntlet.phase !== "round") return;
-  if (throwawayFinishOrder[0] !== null) return;
 
+  if (currentRound(gauntlet) === "shake") {
+    if (canState.status !== "playing") return;
+    canState = tapCan(canState, 0, padIndex, CAN_LAPS[gauntlet.lap]);
+    playCanJolt(synth);
+    return;
+  }
+
+  if (throwawayFinishOrder[0] !== null) return;
   throwawayTaps[0]++;
   playTapBlip(synth);
   if (throwawayTaps[0] >= THROWAWAY_TARGET_TAPS) {
@@ -212,7 +251,28 @@ function frame(now: number): void {
     }
   }
 
-  if (gauntlet.phase === "round") {
+  if (gauntlet.phase === "round" && currentRound(gauntlet) === "shake") {
+    const config = CAN_LAPS[gauntlet.lap];
+    const cpuConfig = CPU_LAPS[gauntlet.lap];
+    for (const racerId of [1, 2] as const) {
+      const tick = tickCpuTimer(canCpuTimers[racerId - 1], cpuConfig, dtMs, canCpuRng);
+      canCpuTimers[racerId - 1] = tick.timer;
+      if (tick.acted && !tick.errored) {
+        const lastPad = canState.racers[racerId].lastPad;
+        const nextPad = ((lastPad ?? -1) + 1) % 4;
+        canState = tapCan(canState, racerId, nextPad, config);
+      }
+    }
+
+    const wasPlaying = canState.status === "playing";
+    canState = tickCan(canState, config, dt);
+    if (wasPlaying && canState.status === "resolved") {
+      playCanLaunch(synth);
+      const placing = resolveCanPlacing(canState);
+      gauntlet = roundResolved(gauntlet, placing);
+      podiumElapsedMs = 0;
+    }
+  } else if (gauntlet.phase === "round") {
     throwawayElapsedMs += dtMs;
     const cpuConfig = CPU_LAPS[gauntlet.lap];
     for (const racerId of [1, 2] as const) {
@@ -262,6 +322,9 @@ function frame(now: number): void {
     drawAttract(stage, attractState);
   } else if (gauntlet.phase === "transition") {
     drawTransition(stage, transitionElapsedMs, { toRound: currentRound(gauntlet), seed: transitionSeed }, drawIncomingRoundStatic);
+  } else if (gauntlet.phase === "round" && currentRound(gauntlet) === "shake") {
+    drawCan(stage, canState, CAN_LAPS[gauntlet.lap], gauntlet.racers);
+    drawFourPads(stage, padPressState);
   } else if (gauntlet.phase === "round") {
     drawThrowawayRound();
   } else if (gauntlet.phase === "podium" && gauntlet.lastPlacing) {
