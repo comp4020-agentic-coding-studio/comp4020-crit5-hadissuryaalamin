@@ -40,6 +40,8 @@ import { drawRhythm } from "./render/scenes/rhythm.ts";
 import { drawAttract, type AttractState } from "./render/scenes/attract.ts";
 import { drawTransition, TRANSITION_DURATION_MS, TRANSITION_STING_MS } from "./render/scenes/transition.ts";
 import { drawDeadFurniture, drawWinBurst, WIN_BURST_MS } from "./render/scenes/dead.ts";
+import { createPadPressState, drawFourPads, pressPad, tickPadPress, type PadPressState } from "./render/pads.ts";
+import { drawCharacter, neutralPose, squashPose, type EyeState, type MouthState } from "./render/character.ts";
 
 // How long each round's own fail animation runs before the fail screen's
 // shared furniture (pips + button) takes over - epic 6.6's 400ms hold is
@@ -166,10 +168,26 @@ function handleTapSide(side: "LEFT" | "RIGHT"): void {
   }
 }
 
+// TEMPORARY v2 demo state (task 011 of the epic-crit5-game v2 rebuild): proves
+// the new character rig (src/render/character.ts) and four-pad input
+// (src/render/pads.ts, src/input/input.ts's onPad) work together in
+// isolation, ahead of the real gauntlet/podium rework in task 012, which will
+// remove this block entirely.
+let v2DemoPadPress: PadPressState = createPadPressState();
+let v2DemoEye: EyeState = "normal";
+let v2DemoMouth: MouthState = "neutral";
+let v2DemoSquash = 0;
+
 attachInput(canvas, {
   onTap: handleTap,
   onTapLeft: () => handleTapSide("LEFT"),
   onTapRight: () => handleTapSide("RIGHT"),
+  onPad: (_player, padIndex) => {
+    v2DemoPadPress = pressPad(v2DemoPadPress, padIndex);
+    v2DemoEye = "wide";
+    v2DemoMouth = "grin";
+    v2DemoSquash = 1;
+  },
 });
 
 window.addEventListener("resize", () => resizeStage(stage));
@@ -329,6 +347,27 @@ function frame(now: number): void {
   } else if (gauntlet.phase === "won") {
     drawDeadFurniture(stage, gauntlet.cleared, wonElapsedMs);
   }
+
+  // TEMPORARY v2 demo overlay (see the block above) — always on top,
+  // regardless of gauntlet phase, purely to prove the rig + pad input work.
+  // Removed by task 012 once the real racer/podium rendering exists.
+  v2DemoPadPress = tickPadPress(v2DemoPadPress, dtMs);
+  v2DemoSquash = Math.max(0, v2DemoSquash - dt * 2.5);
+  if (v2DemoSquash <= 0 && v2DemoEye !== "normal") {
+    v2DemoEye = "normal";
+    v2DemoMouth = "neutral";
+  }
+  drawFourPads(stage, v2DemoPadPress);
+  drawCharacter(stage, {
+    seed: 1,
+    cx: stage.width * 0.5,
+    feetY: stage.height * 0.78,
+    heightU: 30,
+    color: "#FF2D1F",
+    eye: v2DemoEye,
+    mouth: v2DemoMouth,
+    pose: v2DemoSquash > 0 ? squashPose(v2DemoSquash) : neutralPose(),
+  });
 
   requestAnimationFrame(frame);
 }
