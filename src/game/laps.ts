@@ -1,5 +1,6 @@
 import type { OhNoConfig } from "./ohno.ts";
 import type { ShakeConfig } from "./shake.ts";
+import type { ClimberConfig } from "./climber.ts";
 
 export const LAP_COUNT = 3;
 
@@ -54,4 +55,12 @@ export const SHAKE_LAPS: Record<Lap, ShakeConfig> = {
   1: { tapGain: 0.03, decayPerSec: 0.05, idleGrace: 0.35, timerSeconds: 10.0 },
   2: { tapGain: 0.024, decayPerSec: 0.08, idleGrace: 0.35, timerSeconds: 9.0 },
   3: { tapGain: 0.022, decayPerSec: 0.12, idleGrace: 0.35, timerSeconds: 8.5 },
+};
+
+// Epic section 11.3. Lap 1 is pure alternation (doubleChance 0.00) so the
+// mechanic is learned cleanly before doubles arrive on lap 2.
+export const CLIMBER_LAPS: Record<Lap, ClimberConfig> = {
+  1: { floors: 20, timerSeconds: 10.0, stunSeconds: 0.35, slipFloors: 1, doubleChance: 0.0 },
+  2: { floors: 26, timerSeconds: 10.0, stunSeconds: 0.35, slipFloors: 1, doubleChance: 0.2 },
+  3: { floors: 32, timerSeconds: 10.0, stunSeconds: 0.35, slipFloors: 1, doubleChance: 0.3 },
 };

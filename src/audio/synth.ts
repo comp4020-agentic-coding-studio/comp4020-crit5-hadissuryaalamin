@@ -127,6 +127,54 @@ export function playCanLaunch(synth: Synth): void {
   osc.stop(now + durationSec);
 }
 
+// Epic section 10: square alternating 330 Hz / 392 Hz, 50ms. Fires on every
+// correct Climber tap - the alternation doubles as the audio for the
+// alternating pads (330 on a left-pad step, 392 on a right-pad step).
+export function playClimbStep(synth: Synth, side: "LEFT" | "RIGHT"): void {
+  if (!synth.ctx || !synth.master) return;
+  const ctx = synth.ctx;
+  const master = synth.master;
+  const now = ctx.currentTime;
+  const durationSec = 0.05;
+
+  const osc = ctx.createOscillator();
+  osc.type = "square";
+  osc.frequency.value = side === "LEFT" ? 330 : 392;
+
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0.2, now);
+  gain.gain.linearRampToValueAtTime(0.0001, now + durationSec);
+
+  osc.connect(gain);
+  gain.connect(master);
+  osc.start(now);
+  osc.stop(now + durationSec);
+}
+
+// Epic section 10: square 300 -> 150 Hz, 180ms. Fires on a wrong-pad tap in
+// Climber, matching the 180ms slide-down feel.
+export function playSlip(synth: Synth): void {
+  if (!synth.ctx || !synth.master) return;
+  const ctx = synth.ctx;
+  const master = synth.master;
+  const now = ctx.currentTime;
+  const durationSec = 0.18;
+
+  const osc = ctx.createOscillator();
+  osc.type = "square";
+  osc.frequency.setValueAtTime(300, now);
+  osc.frequency.exponentialRampToValueAtTime(150, now + durationSec);
+
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0.2, now);
+  gain.gain.linearRampToValueAtTime(0.0001, now + durationSec);
+
+  osc.connect(gain);
+  gain.connect(master);
+  osc.start(now);
+  osc.stop(now + durationSec);
+}
+
 function noiseBuffer(ctx: AudioContext, durationSec: number): AudioBuffer {
   const length = Math.max(1, Math.floor(ctx.sampleRate * durationSec));
   const buffer = ctx.createBuffer(1, length, ctx.sampleRate);
