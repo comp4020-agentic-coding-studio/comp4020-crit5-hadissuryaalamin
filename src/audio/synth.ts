@@ -74,3 +74,65 @@ export function playTransitionSting(synth: Synth): void {
     osc.stop(now + durationSec);
   }
 }
+
+// Epic section 10: white noise 30ms, bandpass 1200 Hz. Fires on every Shake
+// tap, cause-and-effect in one frame with the can's jolt animation.
+export function playCanJolt(synth: Synth): void {
+  if (!synth.ctx || !synth.master) return;
+  const ctx = synth.ctx;
+  const master = synth.master;
+  const now = ctx.currentTime;
+  const durationSec = 0.03;
+
+  const buffer = noiseBuffer(ctx, durationSec);
+  const source = ctx.createBufferSource();
+  source.buffer = buffer;
+
+  const filter = ctx.createBiquadFilter();
+  filter.type = "bandpass";
+  filter.frequency.value = 1200;
+
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0.25, now);
+  gain.gain.linearRampToValueAtTime(0.0001, now + durationSec);
+
+  source.connect(filter);
+  filter.connect(gain);
+  gain.connect(master);
+  source.start(now);
+  source.stop(now + durationSec);
+}
+
+// Epic section 10: square 200 -> 1200 Hz over 700ms. Fires once when Shake
+// clears (the can launches off the top of the screen).
+export function playCanLaunch(synth: Synth): void {
+  if (!synth.ctx || !synth.master) return;
+  const ctx = synth.ctx;
+  const master = synth.master;
+  const now = ctx.currentTime;
+  const durationSec = 0.7;
+
+  const osc = ctx.createOscillator();
+  osc.type = "square";
+  osc.frequency.setValueAtTime(200, now);
+  osc.frequency.exponentialRampToValueAtTime(1200, now + durationSec);
+
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0.2, now);
+  gain.gain.linearRampToValueAtTime(0.0001, now + durationSec);
+
+  osc.connect(gain);
+  gain.connect(master);
+  osc.start(now);
+  osc.stop(now + durationSec);
+}
+
+function noiseBuffer(ctx: AudioContext, durationSec: number): AudioBuffer {
+  const length = Math.max(1, Math.floor(ctx.sampleRate * durationSec));
+  const buffer = ctx.createBuffer(1, length, ctx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < length; i++) {
+    data[i] = Math.random() * 2 - 1;
+  }
+  return buffer;
+}

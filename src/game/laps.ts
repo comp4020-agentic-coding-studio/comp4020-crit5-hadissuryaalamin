@@ -1,4 +1,5 @@
 import type { OhNoConfig } from "./ohno.ts";
+import type { ShakeConfig } from "./shake.ts";
 
 export const LAP_COUNT = 3;
 
@@ -44,4 +45,13 @@ export const OHNO_LAPS: Record<Lap, OhNoConfig> = {
     holdNeeded: 4.0,
     capSeconds: 14,
   },
+};
+
+// Epic section 11.2. Decay only applies once idleGrace has passed since the
+// last tap, so steady mashing is never punished by arithmetic - only
+// stopping costs you.
+export const SHAKE_LAPS: Record<Lap, ShakeConfig> = {
+  1: { tapGain: 0.03, decayPerSec: 0.05, idleGrace: 0.35, timerSeconds: 10.0 },
+  2: { tapGain: 0.024, decayPerSec: 0.08, idleGrace: 0.35, timerSeconds: 9.0 },
+  3: { tapGain: 0.022, decayPerSec: 0.12, idleGrace: 0.35, timerSeconds: 8.5 },
 };
