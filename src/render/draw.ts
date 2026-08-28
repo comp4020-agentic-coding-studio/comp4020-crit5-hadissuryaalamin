@@ -1,4 +1,5 @@
 import { INK, PAPER } from "./canvas.ts";
+import type { RoundId } from "../game/laps.ts";
 
 export interface StrokeOffset {
   dx: number;
@@ -138,6 +139,15 @@ export function pad(
 
 export type IconKind = "balloon" | "can" | "tower" | "ball";
 
+// Which icon represents each round — used by the attract screen's logo
+// lockup and the transition routine's icon card (epic sections 6.1 and 8).
+export const ROUND_ICON: Record<RoundId, IconKind> = {
+  ohno: "balloon",
+  shake: "can",
+  climber: "tower",
+  rhythm: "ball",
+};
+
 export function icon(
   ctx: CanvasRenderingContext2D,
   kind: IconKind,
@@ -145,6 +155,7 @@ export function icon(
   cy: number,
   size: number,
   color: string,
+  u: number,
   strokeOffset: StrokeOffset,
 ): void {
   ctx.save();
@@ -179,7 +190,9 @@ export function icon(
 
   ctx.fillStyle = color;
   ctx.fill(path);
-  wonkyStroke(ctx, path, strokeWeight(size, true), strokeOffset);
+  // Standard weight against the canvas's own unit `u` (not `size`, the
+  // icon's own footprint) — matches every other primitive in this file.
+  wonkyStroke(ctx, path, strokeWeight(u, false), strokeOffset);
   ctx.restore();
 }
 

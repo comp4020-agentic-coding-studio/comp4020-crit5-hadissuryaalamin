@@ -47,3 +47,30 @@ export function setMuted(synth: Synth, muted: boolean): void {
   }
   writeMuted(muted);
 }
+
+// Epic section 10: pitch-bent square 880 -> 1760 Hz, 180ms, two detuned
+// voices. Fires once at t=0.45 of the transition routine (epic section 8).
+export function playTransitionSting(synth: Synth): void {
+  if (!synth.ctx || !synth.master) return;
+  const ctx = synth.ctx;
+  const master = synth.master;
+  const now = ctx.currentTime;
+  const durationSec = 0.18;
+
+  for (const detuneCents of [-8, 8]) {
+    const osc = ctx.createOscillator();
+    osc.type = "square";
+    osc.frequency.setValueAtTime(880, now);
+    osc.frequency.exponentialRampToValueAtTime(1760, now + durationSec);
+    osc.detune.value = detuneCents;
+
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.2, now);
+    gain.gain.linearRampToValueAtTime(0.0001, now + durationSec);
+
+    osc.connect(gain);
+    gain.connect(master);
+    osc.start(now);
+    osc.stop(now + durationSec);
+  }
+}
