@@ -253,6 +253,34 @@ export function playRhythmThud(synth: Synth): void {
   source.stop(now + durationSec);
 }
 
+// Epic section 10: square triad held 1.8s with slow decay. Fires once on
+// clearing lap 3 round 4 - the game's only celebration, deliberately minimal
+// (the client declined an elaborate win sequence).
+export function playWinChord(synth: Synth): void {
+  if (!synth.ctx || !synth.master) return;
+  const ctx = synth.ctx;
+  const master = synth.master;
+  const now = ctx.currentTime;
+  const durationSec = 1.8;
+  const rootHz = 220;
+  const triad = [rootHz, rootHz * (5 / 4), rootHz * (3 / 2)];
+
+  for (const freq of triad) {
+    const osc = ctx.createOscillator();
+    osc.type = "square";
+    osc.frequency.value = freq;
+
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.16, now);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + durationSec);
+
+    osc.connect(gain);
+    gain.connect(master);
+    osc.start(now);
+    osc.stop(now + durationSec);
+  }
+}
+
 function noiseBuffer(ctx: AudioContext, durationSec: number): AudioBuffer {
   const length = Math.max(1, Math.floor(ctx.sampleRate * durationSec));
   const buffer = ctx.createBuffer(1, length, ctx.sampleRate);

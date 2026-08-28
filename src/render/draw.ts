@@ -46,6 +46,30 @@ export function wonkyStroke(
   ctx.restore();
 }
 
+// Like wonkyStroke, but strokes in an explicit colour instead of ink. Needed
+// only by the dead screen (epic 7.2's dead palette flips ink and paper: its
+// bg IS ink, so the usual ink outline would vanish against its own
+// background — every mark there must be paper-coloured, per epic 6.6).
+export function wonkyStrokeColor(
+  ctx: CanvasRenderingContext2D,
+  path: Path2D,
+  weight: number,
+  offset: StrokeOffset,
+  color: string,
+): void {
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
+  ctx.lineWidth = weight;
+  ctx.strokeStyle = color;
+  ctx.stroke(path);
+  ctx.save();
+  ctx.translate(offset.dx, offset.dy);
+  ctx.globalAlpha = 0.55;
+  ctx.stroke(path);
+  ctx.globalAlpha = 1;
+  ctx.restore();
+}
+
 export function hardShadow(
   ctx: CanvasRenderingContext2D,
   path: Path2D,

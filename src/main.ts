@@ -21,20 +21,35 @@ import {
   playRhythmThud,
   playSlip,
   playTransitionSting,
+  playWinChord,
   setMuted,
 } from "./audio/synth.ts";
 import { createOhNo, tapOhNo, tickOhNo, type OhNoState } from "./game/ohno.ts";
 import { createShake, tapShake, tickShake, type ShakeState } from "./game/shake.ts";
 import { createClimber, tapClimber, tickClimber, type ClimberState } from "./game/climber.ts";
 import { createRhythm, tapRhythm, tickRhythm, type RhythmState } from "./game/rhythm.ts";
-import { OHNO_LAPS, SHAKE_LAPS, CLIMBER_LAPS, RHYTHM_LAPS } from "./game/laps.ts";
+import { OHNO_LAPS, SHAKE_LAPS, CLIMBER_LAPS, RHYTHM_LAPS, type RoundId } from "./game/laps.ts";
 import { mulberry32, type Rng } from "./game/rng.ts";
 import { drawOhno } from "./render/scenes/ohno.ts";
-import { drawShake, LAUNCH_MS as SHAKE_LAUNCH_MS } from "./render/scenes/shake.ts";
-import { drawClimber } from "./render/scenes/climber.ts";
+import { drawShake, LAUNCH_MS as SHAKE_LAUNCH_MS, SLUMP_MS as SHAKE_SLUMP_MS } from "./render/scenes/shake.ts";
+import { drawClimber, FALL_MS as CLIMBER_FALL_MS } from "./render/scenes/climber.ts";
 import { drawRhythm } from "./render/scenes/rhythm.ts";
 import { drawAttract, type AttractState } from "./render/scenes/attract.ts";
 import { drawTransition, TRANSITION_DURATION_MS, TRANSITION_STING_MS } from "./render/scenes/transition.ts";
+import { drawDeadFurniture, drawWinBurst, WIN_BURST_MS } from "./render/scenes/dead.ts";
+
+// How long each round's own fail animation runs before the fail screen's
+// shared furniture (pips + button) takes over - epic 6.6's 400ms hold is
+// added on top of each round's own animation duration (mirrored from each
+// scene's own constant; ohno's isn't exported, so 500 here matches its
+// BURST_MS exactly). Rhythm has no distinct fail animation, so it's 0.
+const DEAD_HOLD_MS = 400;
+const ROUND_FAIL_ANIM_MS: Record<RoundId, number> = {
+  ohno: 500,
+  shake: SHAKE_SLUMP_MS,
+  climber: CLIMBER_FALL_MS,
+  rhythm: 0,
+};
 
 const canvas = document.getElementById("stage") as HTMLCanvasElement;
 const muteButton = document.getElementById("mute") as HTMLButtonElement;
@@ -54,6 +69,7 @@ let climberSeed = 0;
 let climberRng: Rng = mulberry32(0);
 let rhythm: RhythmState = createRhythm();
 let resultElapsedMs = 0;
+let wonElapsedMs = 0;
 
 const attractState: AttractState = { seed: Math.floor(Math.random() * 0xffffffff), elapsedMs: 0, pressElapsedMs: null };
 let transitionElapsedMs = 0;
@@ -240,6 +256,10 @@ function frame(now: number): void {
     if (rhythm.status === "cleared") {
       gauntlet = roundCleared(gauntlet);
       if (gauntlet.phase === "transition") beginTransition();
+      else if (gauntlet.phase === "won") {
+        wonElapsedMs = 0;
+        playWinChord(synth);
+      }
     } else if (rhythm.status === "lost") {
       gauntlet = roundLost(gauntlet);
     }
@@ -252,8 +272,12 @@ function frame(now: number): void {
     resultElapsedMs += dtMs;
   }
 
+  if (gauntlet.phase === "won") {
+    wonElapsedMs += dtMs;
+  }
+
   const paletteId =
-    gauntlet.phase === "dead"
+    gauntlet.phase === "dead" || gauntlet.phase === "won"
       ? "dead"
       : gauntlet.phase === "round" || gauntlet.phase === "transition"
         ? currentRound(gauntlet)
@@ -262,30 +286,38 @@ function frame(now: number): void {
   document.body.style.background = palette.bg;
   fillBackground(stage, palette);
 
+  // The losing round's own fail animation (built per-round in tasks
+  // 002-006) plays out in place before the shared fail-screen furniture
+  // (pips + button) takes over, per epic 6.6's 400ms hold.
+  const deadFurnitureReady =
+    gauntlet.phase === "dead" && resultElapsedMs >= ROUND_FAIL_ANIM_MS[currentRound(gauntlet)] + DEAD_HOLD_MS;
+
   if (gauntlet.phase === "attract") {
     drawAttract(stage, attractState);
   } else if (gauntlet.phase === "transition") {
     drawTransition(stage, transitionElapsedMs, { toRound: currentRound(gauntlet), seed: transitionSeed }, drawIncomingRoundStatic);
-  } else if (
-    (gauntlet.phase === "round" || gauntlet.phase === "dead") &&
-    currentRound(gauntlet) === "ohno"
-  ) {
+  } else if (gauntlet.phase === "round" && currentRound(gauntlet) === "ohno") {
     drawOhno(stage, ohno, OHNO_LAPS[gauntlet.lap], ohnoSeed, resultElapsedMs);
-  } else if (
-    (gauntlet.phase === "round" || gauntlet.phase === "dead") &&
-    currentRound(gauntlet) === "shake"
-  ) {
+  } else if (gauntlet.phase === "round" && currentRound(gauntlet) === "shake") {
     drawShake(stage, shake, SHAKE_LAPS[gauntlet.lap], shakeSeed, resultElapsedMs);
-  } else if (
-    (gauntlet.phase === "round" || gauntlet.phase === "dead") &&
-    currentRound(gauntlet) === "climber"
-  ) {
+  } else if (gauntlet.phase === "round" && currentRound(gauntlet) === "climber") {
     drawClimber(stage, climber, CLIMBER_LAPS[gauntlet.lap], climberSeed, resultElapsedMs);
-  } else if (
-    (gauntlet.phase === "round" || gauntlet.phase === "dead") &&
-    currentRound(gauntlet) === "rhythm"
-  ) {
+  } else if (gauntlet.phase === "round" && currentRound(gauntlet) === "rhythm") {
     drawRhythm(stage, rhythm, RHYTHM_LAPS[gauntlet.lap], resultElapsedMs);
+  } else if (gauntlet.phase === "dead" && !deadFurnitureReady && currentRound(gauntlet) === "ohno") {
+    drawOhno(stage, ohno, OHNO_LAPS[gauntlet.lap], ohnoSeed, resultElapsedMs);
+  } else if (gauntlet.phase === "dead" && !deadFurnitureReady && currentRound(gauntlet) === "shake") {
+    drawShake(stage, shake, SHAKE_LAPS[gauntlet.lap], shakeSeed, resultElapsedMs);
+  } else if (gauntlet.phase === "dead" && !deadFurnitureReady && currentRound(gauntlet) === "climber") {
+    drawClimber(stage, climber, CLIMBER_LAPS[gauntlet.lap], climberSeed, resultElapsedMs);
+  } else if (gauntlet.phase === "dead" && !deadFurnitureReady && currentRound(gauntlet) === "rhythm") {
+    drawRhythm(stage, rhythm, RHYTHM_LAPS[gauntlet.lap], resultElapsedMs);
+  } else if (gauntlet.phase === "dead" && deadFurnitureReady) {
+    drawDeadFurniture(stage, gauntlet.cleared, resultElapsedMs);
+  } else if (gauntlet.phase === "won" && wonElapsedMs < WIN_BURST_MS) {
+    drawWinBurst(stage, wonElapsedMs);
+  } else if (gauntlet.phase === "won") {
+    drawDeadFurniture(stage, gauntlet.cleared, wonElapsedMs);
   }
 
   requestAnimationFrame(frame);
