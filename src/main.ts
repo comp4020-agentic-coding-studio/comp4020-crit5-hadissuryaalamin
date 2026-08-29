@@ -13,17 +13,23 @@ import { attachInput } from "./input/input.ts";
 import {
   createSynth,
   ensureAudioContext,
-  playBurst,
+  playBombPass,
   playCanJolt,
   playCanLaunch,
   playClimbStep,
   playCymbalCrash,
+  playExplosion,
+  playFumble,
   playPadTone,
   playSlip,
+  playSlump,
   playTapBlip,
   playTransitionSting,
   playWinChord,
+  setFuseUrgency,
   setMuted,
+  startFuseHiss,
+  stopFuseHiss,
 } from "./audio/synth.ts";
 import { CPU_LAPS, createCpuTimer, tickCpuTimer, type CpuTimerState } from "./game/cpu.ts";
 import { createCan, resolveCanPlacing, tapCan, tickCan, type CanState } from "./game/can.ts";
@@ -171,6 +177,11 @@ let patternCpuRng: Rng = mulberry32(16);
 let patternSeed = 0;
 let patternResolveMs = 0;
 let patternLitAtMs: number | null = null;
+// How many racers had dropped out as of the last frame. A new entry in
+// `eliminationOrder` is how the render loop notices a slump to sound, the
+// same way `patternLitAtMs` notices a new hit from the game master: the rule
+// module exposes state, never events.
+let patternEliminatedCount = 0;
 let patternCpuTimers: [CpuTimerState, CpuTimerState] = [
   createCpuTimer(CPU_LAPS[1], mulberry32(17)),
   createCpuTimer(CPU_LAPS[1], mulberry32(18)),
@@ -200,6 +211,11 @@ function resolveThrowawayPlacing(): Placing {
 }
 
 function enterCurrentRound(): void {
+  // The fuse is the game's only sustained voice, so it is the only sound that
+  // can outlive the round that started it. Killed here as well as at the
+  // bang, so no path into a round can ever leave it hissing under another one.
+  stopFuseHiss(synth);
+
   throwawayTaps = [0, 0, 0];
   throwawayFinishOrder = [null, null, null];
   throwawayFinishedCount = 0;
@@ -243,6 +259,7 @@ function enterCurrentRound(): void {
   patternCpuRng = mulberry32(patternSeed ^ 0x5bd1e995);
   patternResolveMs = 0;
   patternLitAtMs = null;
+  patternEliminatedCount = 0;
   patternCpuTimers = [
     createCpuTimer(CPU_LAPS[gauntlet.lap], mulberry32(patternSeed ^ 0xcc9e2d51)),
     createCpuTimer(CPU_LAPS[gauntlet.lap], mulberry32(patternSeed ^ 0x1b873593)),
@@ -267,6 +284,9 @@ function handleTap(): void {
   }
 
   if (gauntlet.phase === "dead" || gauntlet.phase === "won") {
+    // Restarting jumps straight back to attract without passing through
+    // enterCurrentRound(), so the fuse gets its own stop here too.
+    stopFuseHiss(synth);
     gauntlet = restartGauntlet();
     attractState.pressElapsedMs = null;
     return;
@@ -285,7 +305,10 @@ function handlePad(padIndex: 0 | 1 | 2 | 3): void {
   if (currentRound(gauntlet) === "shake") {
     if (canState.status !== "playing") return;
     canState = tapCan(canState, 0, padIndex, CAN_LAPS[gauntlet.lap]);
-    playCanJolt(synth);
+    // Pitched by pad, so alternating across the four pads (which is what
+    // earns altGain) sounds different from hammering one (sameGain). The rule
+    // is in the sound; nothing anywhere states it.
+    playCanJolt(synth, padIndex);
     return;
   }
 
@@ -310,8 +333,8 @@ function handlePad(padIndex: 0 | 1 | 2 | 3): void {
     // that it is not your problem yet (or not yet again).
     if (bombState.holder !== 0 || bombState.racers[0].stunRemaining > 0) return;
     bombState = tapBomb(bombState, 0, padIndex, BOMB_LAPS[gauntlet.lap]);
-    if (padIndex === PASS_PAD) playTapBlip(synth);
-    else playSlip(synth);
+    if (padIndex === PASS_PAD) playBombPass(synth);
+    else playFumble(synth);
     return;
   }
 
@@ -323,8 +346,11 @@ function handlePad(padIndex: 0 | 1 | 2 | 3): void {
     const owed = expectedPad(patternState, 0);
     if (owed === null) return;
     patternState = tapPattern(patternState, 0, padIndex);
+    // Only the correct echo is sounded here. A wrong pad is an ELIMINATION in
+    // this round, not a stumble, and it gets the slump - fired from the frame
+    // loop off `eliminationOrder`, so a rival dropping out sounds exactly the
+    // same as the human doing it.
     if (padIndex === owed) playPadTone(synth, padIndex);
-    else playSlip(synth);
     return;
   }
 
@@ -488,21 +514,43 @@ function frame(now: number): void {
     if (bombState.status === "playing" && holder !== 0 && bombState.racers[holder].stunRemaining <= 0) {
       const tick = tickCpuTimer(bombCpuTimers[holder - 1], cpuConfig, dtMs, bombCpuRng);
       bombCpuTimers[holder - 1] = tick.timer;
+      const holderFumbles = bombState.racers[holder].fumbles;
       if (tick.acted) {
         // A CPU error here reads as grabbing for the wrong pad - the same
         // fumble and the same stun a human gets (epic section 5).
         const padIndex = tick.errored ? wrongBombPad(bombCpuRng) : PASS_PAD;
         bombState = tapBomb(bombState, holder, padIndex, config);
+        // Rivals are audible, and audible the same way the human is: the bomb
+        // going round the ring is the round's pulse, and a rival fumbling is
+        // half the joke (epic section 5). Read off the state the tap produced
+        // rather than off `padIndex`, so a tap the rule ignored stays silent.
+        if (bombState.holder !== holder) playBombPass(synth);
+        else if (bombState.racers[holder].fumbles > holderFumbles) playFumble(synth);
       }
     }
 
     bombState = tickBomb(bombState, config, dt);
+
+    // The fuse hisses for exactly as long as it is burning, and gets louder,
+    // brighter and faster as it shortens. Started here rather than on
+    // entering the round because ensureAudioContext only runs on a gesture -
+    // this is the first frame that can be sure there is a context at all.
+    if (bombState.status === "playing") {
+      startFuseHiss(synth);
+      setFuseUrgency(synth, 1 - bombState.fuseRemaining / config.fuseSeconds);
+    }
     // Checked AFTER the tick, never against a pre-tick snapshot. The bang is
     // then held on screen for EXPLOSION_HOLD_MS before the placing is handed
     // to the gauntlet, because a fail the player never sees is not a fail
     // they can learn from (spec line 2: it can be lost).
     if (bombState.status === "resolved") {
-      if (bombExplodeMs === 0) playBurst(synth);
+      if (bombExplodeMs === 0) {
+        // The hiss has to stop on the SAME frame the bang fires - a fuse
+        // still crackling under the explosion is the one thing that would
+        // give away that the two are not the same object.
+        stopFuseHiss(synth);
+        playExplosion(synth);
+      }
       bombExplodeMs += dtMs;
       if (bombExplodeMs >= EXPLOSION_HOLD_MS) {
         gauntlet = roundResolved(gauntlet, resolveBombPlacing(bombState));
@@ -538,6 +586,18 @@ function frame(now: number): void {
       patternLitAtMs = patternState.litSinceMs;
       playCymbalCrash(synth);
       playPadTone(synth, patternState.litPad, true);
+    }
+
+    // A racer dropping out arrives as a longer `eliminationOrder`, never as an
+    // event, so a new entry is what a slump sounds off. Human or rival, the
+    // same sound: watching the other guy go out is the round teaching the
+    // elimination rule, and it wanted an ear as well as an eye. Sounded once
+    // per frame rather than once per new entry - two racers can go out between
+    // frames, and two copies of one sound started on the same sample are one
+    // louder sound, not two slumps.
+    if (patternEliminatedCount < patternState.eliminationOrder.length) {
+      patternEliminatedCount = patternState.eliminationOrder.length;
+      playSlump(synth);
     }
 
     // Checked AFTER the tick, never against a pre-tick snapshot: this round
