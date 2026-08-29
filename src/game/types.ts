@@ -1,7 +1,3 @@
-export type RoundStatus = "playing" | "cleared" | "lost";
-
-export type LossReason = "burst" | "shrivel" | "timeout" | "fell" | "missed";
-
 // v2: competitive racers, epic section 5. Racer 0 is always human (or, on
 // desktop, may be joined by a second human at racer 1 — see input.ts's
 // onSecondPlayerJoin); the run's own elimination/pip tracking is judged

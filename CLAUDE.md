@@ -52,6 +52,52 @@ it into `check`. Growing this file is the work.
 Facts about this stack that are easy to get wrong, and the sensors that now
 catch them. Add to this list rather than re-learning an item the hard way.
 
-_(Empty at the start of week 6: last week's entries were all specific to the
-bare no-bundler stack and to C4's brief, so they stayed behind with the
-prototype. Refill this as this week's stack bites.)_
+### A green `check` does not mean the code runs
+
+`pnpm check` is typecheck + build + vitest. None of the three can see that
+nothing *calls* a thing, so all three stay green over code that never executes.
+This bit three times in one week, each time discovered only when the round was
+being rebuilt:
+
+- v1's Oh No: `drawOhno` had no caller at all. The round on screen was a
+  different game from the one in the file.
+- v1's Rhythm: `drawRhythm` had no caller either, plus three orphaned sound
+  functions describing a deleted rule.
+- The climber rewrite: a correct, fully-typed module never wired into
+  `main.ts`, so the game kept running the throwaway round it was meant to
+  replace.
+
+The bundler makes this worse, not better: it tree-shakes the dead module out,
+so the built site looks clean while a round is quietly missing.
+
+**Sensor:** `spec/sensor-no-dead-code.test.ts` walks the import graph from the
+entry point named in `index.html` and fails on (a) any module under `src/`
+orphaned from it, and (b) any exported symbol referenced nowhere at all —
+including inside its own file. It reads **source, not `dist/`**, because
+tree-shaking is exactly what hides the failure. It deliberately ignores symbols
+used only within their own file: that is over-exporting, not a missing round,
+and a sensor that cries wolf gets muted.
+
+It earned itself on its first run, catching `playTransitionSting` — a fully
+implemented transition sound that nothing called, so the transition was silent.
+
+### Screenshots catch what every automated check misses
+
+Every task this week that rendered anything shipped a defect that typecheck,
+build and vitest were all green through, and that only a screenshot exposed:
+characters drawn as black blobs on a near-black palette (a background at
+~1.1:1 against `INK`); a prop covering the character's face; an explosion
+drawn *behind* the cast; a scene stranded tiny at phone size; figures rendering
+as near-solid ink because rig strokes scaled from the wrong unit.
+
+Look at the rendered page at **both** 900x700 and 390x844 before believing any
+visual work is done. This is not a substitute for a sensor — it is the part no
+sensor covers.
+
+### Anything that must be *seen* needs an explicit hold
+
+Terminal moments resolve the state machine on the same frame they fire, so they
+draw for zero frames unless held. The explosion needed 750ms; the elimination
+slump needed 900ms. If a visual moment carries meaning, give it a duration and
+verify it on screen — the logic being correct is not the same as the player
+seeing it.
