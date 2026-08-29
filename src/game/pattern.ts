@@ -4,9 +4,11 @@ import type { Rng } from "./rng.ts";
 // Follow the Rhythm (epic v2 section 7.4) — a COMPLETE rebuild, not a port.
 // v1 built a beat-matching game judged against a millisecond window; this is
 // call-and-response, Simon-style, and there is NO timing window anywhere in
-// this module. Nothing here is judged against when a pad was hit, only
-// against WHICH pad was hit. The v1 rule module is deleted alongside this one
-// landing, and so is the race-to-N-patterns draft the client rejected.
+// this module. Nothing here is judged against WHEN, within a window, a pad was
+// hit — only against WHICH pad was hit, and (since the amendment below)
+// against whether one was hit at all before a deadline measured in whole
+// seconds. The v1 rule module is deleted alongside this one landing, and so is
+// the race-to-N-patterns draft the client rejected.
 //
 // The rule, as CONFIRMED by the client — last one standing:
 //   - the game master sounds a pattern of `pattern.length` pads, then waits.
@@ -14,6 +16,12 @@ import type { Rng } from "./rng.ts";
 //   - every racer still in echoes the pattern back, in order.
 //   - a wrong pad eliminates that racer from the round at once. No retry, no
 //     replay from the start of the pattern.
+//   - AMENDED 2026-08-29 (epic 7.4's amendment note): so does not echoing at
+//     all. A racer who has not played their next hit within config.echoSeconds
+//     — measured from the game master finishing the pattern, or from that
+//     racer's own previous hit — is eliminated by exactly the same path a
+//     wrong pad takes, so the drop-out, the slump and the placing are
+//     identical. Doing nothing is a mistake, not a shelter.
 //   - survivors carry on against a longer pattern. Length grows with the lap
 //     (config.startLength), with every pattern echoed clean, and again every
 //     time a racer drops.
@@ -51,6 +59,17 @@ export interface PatternConfig {
   // Safety valve. If nobody has been eliminated by the time this runs out,
   // the round is ranked instead of won — see resolvePatternPlacing.
   roundTimeoutSeconds: number;
+  // How long a racer may go without playing their next hit before the round
+  // treats the silence as the mistake it is (epic 7.4's amendment). Measured
+  // from the game master finishing the pattern for the first hit, and from
+  // that racer's own previous hit for every hit after it.
+  //
+  // This is NOT a timing window and must never be tuned into one. It is a
+  // deadline in whole seconds, several times longer than any gap a player
+  // echoing a pattern actually leaves, and its only job is to stop a racer
+  // sheltering behind inaction. If it ever eliminates someone who was playing
+  // rather than someone who was not, the number is wrong.
+  echoSeconds: number;
 }
 
 export type PatternPhase = "demo" | "playback";
@@ -194,6 +213,44 @@ function afterElimination(state: PatternState): PatternState {
   return state;
 }
 
+// THE elimination path. Both ways out of this round go through here — the
+// wrong pad below, and the missed deadline in tickPattern — so a racer who
+// never echoed drops out, slumps and places exactly as one who reached for
+// the wrong drum does. `padHit` is the pad that did it, or null when the
+// mistake was playing nothing at all; the render layer reads the stamps, and
+// a null there is the honest record that no pad was ever struck.
+function eliminateRacer(
+  state: PatternState,
+  racerId: RacerId,
+  padHit: PadIndex | null,
+): PatternState {
+  const racer = state.racers[racerId];
+  const racers = [...state.racers] as PatternState["racers"];
+  racers[racerId] = {
+    ...racer,
+    eliminated: true,
+    wrongPadHit: padHit,
+    eliminatedAtMs: state.elapsedMs,
+    lastHitPad: padHit ?? racer.lastHitPad,
+    lastHitAtMs: padHit === null ? racer.lastHitAtMs : state.elapsedMs,
+  };
+  return afterElimination({
+    ...state,
+    racers,
+    eliminationOrder: [...state.eliminationOrder, racerId],
+  });
+}
+
+// When this racer's next hit is due, as a round-clock stamp. The first hit of
+// a pattern is measured from the game master finishing it (phaseChangedAtMs
+// is stamped on the flip into playback); every hit after it is measured from
+// that racer's own previous hit.
+function echoDueAtMs(state: PatternState, racerId: RacerId, config: PatternConfig): number {
+  const racer = state.racers[racerId];
+  const since = racer.step === 0 ? state.phaseChangedAtMs : (racer.lastHitAtMs ?? state.phaseChangedAtMs);
+  return since + config.echoSeconds * 1000;
+}
+
 // A racer echoing one hit of the pattern back. A hit on the pad they owe
 // advances them; ANY other pad puts them out of the round then and there.
 // Hits from a racer who is already out, who has finished this pattern, or who
@@ -209,21 +266,7 @@ export function tapPattern(state: PatternState, racerId: RacerId, padIndex: PadI
   const owed = state.pattern[racer.step];
   const racers = [...state.racers] as PatternState["racers"];
 
-  if (padIndex !== owed) {
-    racers[racerId] = {
-      ...racer,
-      eliminated: true,
-      wrongPadHit: padIndex,
-      eliminatedAtMs: state.elapsedMs,
-      lastHitPad: padIndex,
-      lastHitAtMs: state.elapsedMs,
-    };
-    return afterElimination({
-      ...state,
-      racers,
-      eliminationOrder: [...state.eliminationOrder, racerId],
-    });
-  }
+  if (padIndex !== owed) return eliminateRacer(state, racerId, padIndex);
 
   const step = racer.step + 1;
   const finished = step >= state.pattern.length;
@@ -274,9 +317,24 @@ export function tickPattern(
       !r.eliminated && r.step < next.pattern.length ? { ...r, playbackMs: r.playbackMs + dt * 1000 } : r,
     ) as PatternState["racers"];
 
-    const stillIn = survivors(next);
-    if (stillIn.every((r) => next.racers[r].step >= next.pattern.length)) {
-      next = beginNextPattern(next, config, rng);
+    // Silence is a mistake (epic 7.4's amendment). Checked in racer id order
+    // so two racers running out on the same tick still drop in a defined
+    // order, and stopped the moment the round resolves under us — there is
+    // nobody left to hold to a deadline once one racer is standing.
+    for (const racerId of survivors(next)) {
+      if (next.status !== "playing") break;
+      const racer = next.racers[racerId];
+      if (racer.step >= next.pattern.length) continue;
+      if (next.elapsedMs >= echoDueAtMs(next, racerId, config)) {
+        next = eliminateRacer(next, racerId, null);
+      }
+    }
+
+    if (next.status === "playing") {
+      const stillIn = survivors(next);
+      if (stillIn.every((r) => next.racers[r].step >= next.pattern.length)) {
+        next = beginNextPattern(next, config, rng);
+      }
     }
   } else {
     let { demoIndex, demoTimer, litSinceMs } = next;

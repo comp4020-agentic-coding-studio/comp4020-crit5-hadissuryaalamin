@@ -109,6 +109,16 @@ export const CLIMBER_LAPS: Record<Lap, ClimberConfig> = {
 // lap 1 a pattern costs about (n * 0.62 + 1.3)s of demo plus about n * 0.6s
 // of echo at a rival's reaction speed, so three patterns run to roughly 15s;
 // 30s is about double the expected round and only bites when someone stalls.
+//
+// echoSeconds is the epic 7.4 AMENDMENT's deadline, and it is deliberately
+// NOT a timing dial. A racer echoing a pattern leaves gaps of roughly 0.4-0.7s
+// between hits once they have started, and a longer pause — call it 1.5-2.0s
+// at worst on a long pattern — before the first hit while they recall it.
+// These values sit at three to nine times that, so the only thing they can
+// catch is a racer who is not playing at all. They ease down across the laps
+// only because the whole round's tempo does; the margin over real play stays
+// enormous at every lap, which is the property that matters. If play ever
+// eliminates someone who was echoing, this number is wrong, not the player.
 export const PATTERN_LAPS: Record<Lap, PatternConfig> = {
   1: {
     startLength: 3,
@@ -120,6 +130,7 @@ export const PATTERN_LAPS: Record<Lap, PatternConfig> = {
     demoLitSeconds: 0.34,
     demoHoldSeconds: 0.6,
     roundTimeoutSeconds: 30,
+    echoSeconds: 4.5,
   },
   2: {
     startLength: 4,
@@ -131,6 +142,7 @@ export const PATTERN_LAPS: Record<Lap, PatternConfig> = {
     demoLitSeconds: 0.29,
     demoHoldSeconds: 0.5,
     roundTimeoutSeconds: 32,
+    echoSeconds: 4.0,
   },
   3: {
     startLength: 5,
@@ -142,5 +154,6 @@ export const PATTERN_LAPS: Record<Lap, PatternConfig> = {
     demoLitSeconds: 0.25,
     demoHoldSeconds: 0.42,
     roundTimeoutSeconds: 34,
+    echoSeconds: 3.5,
   },
 };
