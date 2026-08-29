@@ -101,3 +101,35 @@ draw for zero frames unless held. The explosion needed 750ms; the elimination
 slump needed 900ms. If a visual moment carries meaning, give it a duration and
 verify it on screen — the logic being correct is not the same as the player
 seeing it.
+
+### A feature can be finished on one side of a boundary and never connected
+
+Two-human mode had never once worked. `input.ts` was correct throughout: it
+tracked the player slot and offered `onSecondPlayerJoin`. `main.ts` took the
+callback as `onPad: (_player, padIndex) => handlePad(padIndex)` — the slot
+discarded in the parameter list — and never passed the join handler at all.
+Pressing `1`-`4` silently added taps for player one. Typecheck, build, the
+whole suite and the dead-code sensor were all green over a completely dead
+feature for eight tasks.
+
+**This is the sensor's blind spot, and it is worth knowing precisely.**
+`spec/sensor-no-dead-code.test.ts` catches an *export* that nothing references.
+It cannot see a parameter that is accepted and dropped, or an interface field
+nobody supplies, because the function around it is called normally. A discarded
+`_`-prefixed parameter on a callback is the specific shape to distrust: it is
+the compiler being told to stop asking. When a module offers a capability,
+check the caller actually consumes it — grep the field name, not the function
+name.
+
+### Rig strokes must scale from the scene's own unit
+
+Four separate tasks have now independently re-derived this. `strokeWeight` has
+a 4px floor and a 1.2x multiplier sized for the stage unit `u`, and limb blobs
+are `2.2 * u`. Any scene drawing characters at a smaller unit than the stage —
+a transition card, a phone viewport, a cast of three side by side — gets the
+stroke clamped to 16px, which fills the blob solid: characters render as black
+flowers or near-solid ink. The fix each time was the same, a scene-local unit
+plus `fittedBlobScale`.
+
+It is the single most repeated defect of the week, it is invisible to every
+automated check, and it only ever showed up in a screenshot at 390x844.
