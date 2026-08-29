@@ -112,7 +112,12 @@ export function drawBomb(
     (playBottom * 0.85) / STACK_U,
     u * MAX_SCENE_SCALE,
   );
-  const feetY = Math.min(playBottom - 3 * s, playBottom * 0.58 + 11 * s);
+  // 0.58 stranded the cast in the middle of the frame with 200px of empty
+  // ground under them at 390x844 — the same "the frame is badly used" note
+  // the client made about Shake. 0.74 stands them near the floor at both
+  // viewports; the cap keeps the human's foot ring (5.4 scene-units below
+  // the feet) clear of the pad band, which 3s did not.
+  const feetY = Math.min(playBottom - 6 * s, playBottom * 0.74 + 11 * s);
   const exploded = state.status === "resolved";
 
   const seatX = (i: number): number => width * (SEAT_FIRST + i * SEAT_GAP);
