@@ -1,6 +1,6 @@
 import type { Stage } from "../canvas.ts";
 import { PAPER } from "../canvas.ts";
-import { hardShadow, strokeWeight, wonkyStrokeColor } from "../draw.ts";
+import { definitionStroke, modelledSurface, paperAlpha, shade, softShadow } from "../draw.ts";
 import { drawCharacter, neutralPose, squashPose, stretchPose } from "../character.ts";
 import type { Place, Placing, Racer } from "../../game/types.ts";
 
@@ -34,12 +34,20 @@ export function drawPodium(stage: Stage, racers: readonly Racer[], placing: Plac
     const blockH = BLOCK_HEIGHT_U[place] * u * t;
     const blockW = BLOCK_WIDTH_U * u;
 
+    // A block of stone with a lit top face, not a white rectangle: the
+    // podium is the readout, so it has to have a height you can see.
     const path = new Path2D();
     path.rect(x, baseY - blockH, blockW, blockH);
-    hardShadow(ctx, path, 0.9 * u, 1.1 * u);
-    ctx.fillStyle = PAPER;
-    ctx.fill(path);
-    wonkyStrokeColor(ctx, path, strokeWeight(u, true), { dx: 0.35 * u, dy: 0.35 * u }, PAPER);
+    softShadow(ctx, path, 1.4 * u, 1.8 * u, 4 * u, 0.34);
+    modelledSurface(ctx, path, { x, y: baseY - blockH, width: blockW, height: blockH }, PAPER, Math.max(1, 0.3 * u), {
+      outline: shade(PAPER, -0.3),
+      light: 0.2,
+      dark: 0.34,
+    });
+    const top = new Path2D();
+    top.moveTo(x, baseY - blockH + 0.5 * u);
+    top.lineTo(x + blockW, baseY - blockH + 0.5 * u);
+    definitionStroke(ctx, top, Math.max(1, 0.4 * u), paperAlpha(0.85));
 
     const pose =
       place === 1 ? stretchPose(0.6 * t) : place === 3 ? squashPose(0.6 * t) : neutralPose();
@@ -55,6 +63,16 @@ export function drawPodium(stage: Stage, racers: readonly Racer[], placing: Plac
       eye,
       mouth,
       pose,
+      // The reaction (epic 8.3), which is what this screen exists to show:
+      // the winner's arms go up and they bounce, the loser's head drops and
+      // their arms hang. Third place slumps forward over its own plinth.
+      armLift: place === 1 ? 1.15 * t : place === 3 ? -0.2 * t : 0.2 * t,
+      armReach: place === 1 ? 0.55 * t : -0.3,
+      lean: place === 3 ? 20 * t : 0,
+      headTilt: place === 1 ? -4 * t : place === 3 ? 22 * t : 0,
+      bounce: place === 1 ? Math.abs(Math.sin((elapsedMs / 260) * Math.PI)) * 0.04 * t : 0,
+      phase: (elapsedMs / 260) * Math.PI * 2,
+      follow: place === 1 ? 0.4 * t : -0.3 * t,
     });
 
     x += blockW + BLOCK_GAP_U * u;

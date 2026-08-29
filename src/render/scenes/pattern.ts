@@ -1,6 +1,15 @@
 import type { Stage } from "../canvas.ts";
 import { INK, PALETTES, PAPER } from "../canvas.ts";
-import { hardShadow, strokeWeight, wonkyStroke } from "../draw.ts";
+import {
+  definitionStroke,
+  inkAlpha,
+  modelledSurface,
+  paperAlpha,
+  shade,
+  softShadow,
+  strokeWeight,
+  wonkyStroke,
+} from "../draw.ts";
 import {
   drawCharacter,
   drawFootRing,
@@ -205,14 +214,16 @@ function drawBunting(stage: Stage, seed: number, color: string, s: number): void
     }
   }
 
-  ctx.lineJoin = "round";
-  ctx.lineCap = "round";
-  ctx.lineWidth = Math.max(2, 0.45 * s);
-  ctx.strokeStyle = INK;
-  ctx.stroke(line);
-  ctx.fillStyle = color;
+  definitionStroke(ctx, line, Math.max(1.4, 0.32 * s), inkAlpha(0.55));
+  // Paper triangles catch the light on their upper half and fall into shade
+  // on the lower, which is what makes a row of flags read as cloth.
+  softShadow(ctx, flags, 0.6 * s, 0.9 * s, 1.6 * s, 0.28);
+  const cloth = ctx.createLinearGradient(0, y0, 0, y0 + sag * 2.6);
+  cloth.addColorStop(0, shade(color, 0.3));
+  cloth.addColorStop(1, shade(color, -0.3));
+  ctx.fillStyle = cloth;
   ctx.fill(flags);
-  wonkyStroke(ctx, flags, Math.max(2, 0.4 * s), { dx: 0.2 * s, dy: 0.2 * s });
+  definitionStroke(ctx, flags, Math.max(1, 0.24 * s), shade(color, -0.5));
 }
 
 // The raised platform the game master stands on, so it is obviously ABOVE the
@@ -228,13 +239,18 @@ function drawDais(stage: Stage, l: Layout, color: string, seed: number): void {
 
   const path = new Path2D();
   path.rect(x, y, w, h);
-  hardShadow(ctx, path, 0.9 * l.s, 1.1 * l.s);
-  ctx.fillStyle = color;
-  ctx.fill(path);
-  wonkyStroke(ctx, path, strokeWeight(l.s, false), {
-    dx: keyedRange(seed, "dais-dx", 0.35 * l.s),
-    dy: keyedRange(seed, "dais-dy", 0.35 * l.s),
+  softShadow(ctx, path, 1.2 * l.s, 1.6 * l.s, 3 * l.s, 0.36);
+  modelledSurface(ctx, path, { x, y, width: w, height: h }, color, Math.max(1, 0.3 * l.s), {
+    offset: {
+      dx: keyedRange(seed, "dais-dx", 0.2 * l.s),
+      dy: keyedRange(seed, "dais-dy", 0.2 * l.s),
+    },
   });
+  // The lit front lip of the stage.
+  const lip = new Path2D();
+  lip.moveTo(x, y + 0.5 * l.s);
+  lip.lineTo(x + w, y + 0.5 * l.s);
+  definitionStroke(ctx, lip, Math.max(1, 0.4 * l.s), paperAlpha(0.4));
 }
 
 // The colour of the hit, thrown across the whole stage behind the game master.
@@ -391,16 +407,22 @@ function drawCymbal(
   const r = CYMBAL_R_U * s * (1 + impact * 0.18);
   const path = new Path2D();
   path.ellipse(cx, cy, r * 0.44, r, (side * 22 * Math.PI) / 180, 0, Math.PI * 2);
-  hardShadow(ctx, path, 0.7 * s, 0.9 * s);
-  ctx.fillStyle = color;
-  ctx.fill(path);
-  wonkyStroke(ctx, path, strokeWeight(s * 0.8, false), { dx: 0.25 * s, dy: 0.25 * s });
+  softShadow(ctx, path, 0.5 * s, 0.8 * s, 1.8 * s, 0.3);
+  // Hammered brass: the disc is lit across its face and darkens at both rims,
+  // with a bright boss in the middle. A flat fill made it a coloured pill.
+  modelledSurface(ctx, path, { x: cx - r * 0.5, y: cy - r, width: r, height: r * 2 }, color, Math.max(1, 0.24 * s), {
+    light: 0.44,
+    dark: 0.42,
+    gloss: 1,
+  });
 
   const boss = new Path2D();
   boss.arc(cx, cy, r * 0.2, 0, Math.PI * 2);
-  ctx.fillStyle = PAPER;
+  const bg = ctx.createRadialGradient(cx - r * 0.07, cy - r * 0.08, 0, cx, cy, r * 0.2);
+  bg.addColorStop(0, PAPER);
+  bg.addColorStop(1, shade(color, -0.2));
+  ctx.fillStyle = bg;
   ctx.fill(boss);
-  wonkyStroke(ctx, boss, Math.max(2, 0.3 * s), { dx: 0.15 * s, dy: 0.15 * s });
 }
 
 // Comic-book clang lines, drawn only on the frames right after a hit. They are
@@ -462,10 +484,12 @@ function drawRacer(
     : 0;
   const lean = slumped * 34 * (index === 2 ? -1 : 1);
 
-  ctx.save();
-  ctx.translate(cx, feetY);
-  ctx.rotate((lean * Math.PI) / 180);
-  ctx.translate(-cx, -feetY);
+  // Drumming: hands alternate on a beat clock while a racer still owes hits,
+  // and stop the instant they are done or out. The rig owns the shape, the
+  // scene owns the clock.
+  const beat = (state.elapsedMs / 190) * Math.PI * 2 + index * 1.7;
+  const drumming = owing ? 1 : 0;
+
   drawCharacter(stage, {
     seed: racer.character + 1,
     cx,
@@ -478,8 +502,17 @@ function drawRacer(
     // they answer.
     gaze: r.eliminated ? { x: 0, y: 0.9 } : state.phase === "demo" ? { x: 0, y: -0.85 } : { x: 0, y: 0.55 },
     pose: poseFor(r, state, slumped, finished),
+    // The slump was a `ctx.rotate` around the rig, which tipped the figure's
+    // contact shadow over with it. It is the rig's own lean now.
+    lean,
+    headTilt: slumped * 12 - Math.sin(beat - 0.7) * 5 * drumming,
+    phase: beat,
+    armLift: 0.55 + drumming * 0.12,
+    armReach: -0.35,
+    armSwing: 0.5 * drumming,
+    bounce: drumming ? Math.abs(Math.sin(beat)) * 0.01 : 0,
+    follow: -slumped * 0.5 + Math.sin(beat - 1.2) * 0.35 * drumming,
   });
-  ctx.restore();
 
   drawDrum(stage, cx, feetY, l.s, r, state, racer.colour);
   drawChipRow(
@@ -550,17 +583,33 @@ function drawDrum(
   shell.ellipse(cx, cy + bodyH, rx, ry, 0, Math.PI, 0, true);
   shell.lineTo(cx + rx, cy);
   shell.closePath();
-  hardShadow(ctx, shell, 0.9 * s, 1.1 * s);
-  ctx.fillStyle = racerColor;
+  softShadow(ctx, shell, 1.1 * s, 1.5 * s, 2.8 * s, 0.34);
+  // A lacquered drum shell: lit down the left, dark on the right, with two
+  // tension hoops. Flat colour plus an ink outline read as a bucket.
+  const lacquer = ctx.createLinearGradient(cx - rx, 0, cx + rx, 0);
+  lacquer.addColorStop(0, shade(racerColor, -0.34));
+  lacquer.addColorStop(0.26, shade(racerColor, 0.26));
+  lacquer.addColorStop(0.68, racerColor);
+  lacquer.addColorStop(1, shade(racerColor, -0.46));
+  ctx.fillStyle = lacquer;
   ctx.fill(shell);
-  wonkyStroke(ctx, shell, strokeWeight(s, false), { dx: 0.3 * s, dy: 0.3 * s });
+  definitionStroke(ctx, shell, Math.max(1, 0.26 * s), shade(racerColor, -0.55));
 
+  const headColor =
+    flashing && r.lastHitPad !== null ? PAD_COLORS[r.lastHitPad] : r.eliminated ? "#7A6E74" : PAPER;
   const head = new Path2D();
   head.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
-  ctx.fillStyle =
-    flashing && r.lastHitPad !== null ? PAD_COLORS[r.lastHitPad] : r.eliminated ? "#7A6E74" : PAPER;
+  // The skin is stretched: brightest where the light lands, shaded at the far
+  // rim, so a struck drum has a surface to strike.
+  const skin = ctx.createRadialGradient(cx - rx * 0.3, cy - ry * 0.4, ry * 0.1, cx, cy, rx);
+  skin.addColorStop(0, shade(headColor, 0.34));
+  skin.addColorStop(0.7, headColor);
+  skin.addColorStop(1, shade(headColor, -0.3));
+  ctx.fillStyle = skin;
   ctx.fill(head);
-  wonkyStroke(ctx, head, strokeWeight(s, false), { dx: 0.3 * s, dy: 0.3 * s });
+  definitionStroke(ctx, head, Math.max(1, 0.3 * s), shade(headColor, -0.5));
+  // The tension hoop over the rim.
+  definitionStroke(ctx, head, Math.max(1, 0.18 * s), paperAlpha(0.4));
 }
 
 // ---------------------------------------------------------------------------
@@ -590,11 +639,14 @@ function drawChipRow(
     const color = fill(i);
     const chip = new Path2D();
     chip.arc(x, cy, CHIP_R_U * s, 0, Math.PI * 2);
-    ctx.fillStyle = color ?? PAPER;
-    ctx.globalAlpha = color ? 1 : 0.45;
-    ctx.fill(chip);
-    ctx.globalAlpha = 1;
-    wonkyStroke(ctx, chip, Math.max(2, 0.4 * s), { dx: 0.15 * s, dy: 0.15 * s });
+    if (color) {
+      const box = { x: x - CHIP_R_U * s, y: cy - CHIP_R_U * s, width: CHIP_R_U * s * 2, height: CHIP_R_U * s * 2 };
+      modelledSurface(ctx, chip, box, color, Math.max(1, 0.22 * s), { gloss: 1 });
+    } else {
+      ctx.fillStyle = paperAlpha(0.22);
+      ctx.fill(chip);
+      definitionStroke(ctx, chip, Math.max(1, 0.22 * s), paperAlpha(0.55));
+    }
 
     if (cross(i)) {
       const x1 = new Path2D();
@@ -606,7 +658,7 @@ function drawChipRow(
       ctx.lineJoin = "round";
       ctx.lineCap = "round";
       ctx.lineWidth = Math.max(2, 0.6 * s);
-      ctx.strokeStyle = INK;
+      ctx.strokeStyle = inkAlpha(0.8);
       ctx.stroke(x1);
     }
   }

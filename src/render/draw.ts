@@ -46,30 +46,6 @@ export function wonkyStroke(
   ctx.restore();
 }
 
-// Like wonkyStroke, but strokes in an explicit colour instead of ink. Needed
-// only by the dead screen (epic 7.2's dead palette flips ink and paper: its
-// bg IS ink, so the usual ink outline would vanish against its own
-// background — every mark there must be paper-coloured, per epic 6.6).
-export function wonkyStrokeColor(
-  ctx: CanvasRenderingContext2D,
-  path: Path2D,
-  weight: number,
-  offset: StrokeOffset,
-  color: string,
-): void {
-  ctx.lineJoin = "round";
-  ctx.lineCap = "round";
-  ctx.lineWidth = weight;
-  ctx.strokeStyle = color;
-  ctx.stroke(path);
-  ctx.save();
-  ctx.translate(offset.dx, offset.dy);
-  ctx.globalAlpha = 0.55;
-  ctx.stroke(path);
-  ctx.globalAlpha = 1;
-  ctx.restore();
-}
-
 export function hardShadow(
   ctx: CanvasRenderingContext2D,
   path: Path2D,
@@ -186,11 +162,21 @@ export function icon(
       break;
   }
 
-  ctx.fillStyle = color;
-  ctx.fill(path);
-  // Standard weight against the canvas's own unit `u` (not `size`, the
-  // icon's own footprint) — matches every other primitive in this file.
-  wonkyStroke(ctx, path, strokeWeight(u, false), strokeOffset);
+  // Modelled like everything else since task 021 (see below): a gradient
+  // across the icon's own footprint, a bevel, a highlight, and a thin outline
+  // in a darkened version of the icon's colour. The weight is derived from
+  // `size`, the icon's own footprint, NOT from the stage unit — that is the
+  // repeated defect CLAUDE.md records, and an icon is drawn at card scale.
+  softShadow(ctx, path, size * 0.03, size * 0.04, size * 0.07, 0.3);
+  modelledSurface(
+    ctx,
+    path,
+    { x: -size * 0.5, y: -size * 0.5, width: size, height: size },
+    color,
+    Math.max(1, size * 0.022),
+    { offset: strokeOffset },
+  );
+  void u;
   ctx.restore();
 }
 

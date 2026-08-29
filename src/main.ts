@@ -410,23 +410,13 @@ window.addEventListener("resize", () => resizeStage(stage));
 // per-round static scene of its own. Real microgames (tasks 013-016) will
 // give drawTransition their own preview via the same callback shape.
 function drawIncomingRoundStatic(): void {
-  const spacing = stage.width / 4;
-  for (let i = 0; i < 3; i++) {
-    drawCharacter(stage, {
-      seed: i + 1,
-      cx: spacing * (i + 1),
-      // Down on the pad band's top edge, where a real round stands its cast.
-      // At 0.7 the preview's heads pushed out from under the transition card
-      // at phone size and the routine showed the same three racers twice, in
-      // two rows.
-      feetY: stage.height * (1 - PAD_BAND_FRACTION),
-      heightU: 20,
-      color: gauntlet.racers[i].colour,
-      eye: "normal",
-      mouth: "neutral",
-      pose: neutralPose(),
-    });
-  }
+  // Just the incoming round's control surface. It used to also stand the
+  // three racers here, which put the SAME three racers on screen twice — once
+  // on the announcement card and once underneath it, poking out below the
+  // card's bottom edge at 390x844 where the card is smallest. The pad band is
+  // enough: it says a round is about to start, and it is the one piece of
+  // furniture every round shares.
+  drawFourPads(stage, padPressState);
 }
 
 function drawThrowawayRound(): void {

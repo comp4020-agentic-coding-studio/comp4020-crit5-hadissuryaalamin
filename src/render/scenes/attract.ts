@@ -1,6 +1,12 @@
 import type { Stage } from "../canvas.ts";
 import { PALETTES, PAPER } from "../canvas.ts";
-import { hardShadow, strokeWeight, wonkyStroke } from "../draw.ts";
+import {
+  definitionStroke,
+  modelledSurface,
+  paperAlpha,
+  shade,
+  softShadow,
+} from "../draw.ts";
 import {
   drawCharacter,
   handPositions,
@@ -107,15 +113,24 @@ function layout(stage: Stage): AttractLayout {
 
 export function drawAttract(stage: Stage, state: AttractState): void {
   const l = layout(stage);
-  drawKangaroo(stage, l, state.seed);
+  drawKangaroo(stage, l, state.seed, state.elapsedMs);
   drawButton(stage, l, state, PALETTES.attract.primary);
 }
 
-// Deliberately takes no time value. Epic v1 section 7.8, carried into v2
-// section 3: the button's pulse is the ONLY motion on this screen, so the
-// mascot is a still figure — a seeded-stable pose, not an idle animation.
-function drawKangaroo(stage: Stage, l: AttractLayout, seed: number): void {
+// TASK 021: this used to take no time value at all, as task 017's structural
+// enforcement of "the button's pulse is the only motion on this screen". The
+// client played the built game, called it static, and asked specifically for
+// the CAST to be animated. So the mascot now breathes — and only breathes:
+// one slow idle cycle in the body, with the ears and tail trailing it.
+//
+// The rule that was being enforced is NOT relaxed. Section 3 forbids AMBIENT
+// BACKGROUND animation, and the background here is `fillBackground`, which
+// still takes no time value and still cannot move. What moves on this screen
+// is a character and a button, both in front, both deliberate.
+function drawKangaroo(stage: Stage, l: AttractLayout, seed: number, elapsedMs: number): void {
   const { u } = stage;
+
+  const idle = (elapsedMs / 2400) * Math.PI * 2;
 
   const spec: CharacterSpec = {
     seed: seed ^ 0x4b41,
@@ -146,8 +161,15 @@ function drawKangaroo(stage: Stage, l: AttractLayout, seed: number): void {
     // arms dead horizontal: the rig strokes a limb as a straight line, so a
     // horizontal arm reads as a scarecrow's broom handle. Raised and drawn in,
     // the arms are diagonal and the figure reads as a musician.
-    armLift: 0.95,
+    armLift: 0.95 + Math.sin(idle) * 0.03,
     armReach: 0.75,
+    // The idle. A slow 2.4s cycle: the chest rises, the head settles a beat
+    // later, and the ears and tail trail both. Small enough that the button
+    // is still the thing asking to be pressed.
+    phase: idle,
+    bounce: (0.5 + 0.5 * Math.sin(idle)) * 0.012,
+    headTilt: Math.sin(idle - 0.8) * 2.4,
+    follow: Math.sin(idle - 1.3) * 0.16,
   };
 
   const hands = handPositions(stage, spec);
@@ -161,16 +183,20 @@ function drawCymbal(stage: Stage, cx: number, cy: number, r: number, side: numbe
   const { ctx, u } = stage;
   const path = new Path2D();
   path.ellipse(cx, cy, r * 0.44, r, (side * 22 * Math.PI) / 180, 0, Math.PI * 2);
-  hardShadow(ctx, path, 0.9 * u, 1.1 * u);
-  ctx.fillStyle = KANGA_CYMBAL;
-  ctx.fill(path);
-  wonkyStroke(ctx, path, strokeWeight(u * 0.7, false), { dx: 0.3 * u, dy: 0.3 * u });
+  softShadow(ctx, path, 0.8 * u, 1.1 * u, 2.2 * u, 0.3);
+  modelledSurface(ctx, path, { x: cx - r * 0.5, y: cy - r, width: r, height: r * 2 }, KANGA_CYMBAL, Math.max(1, r * 0.05), {
+    light: 0.44,
+    dark: 0.42,
+    gloss: 1,
+  });
 
   const boss = new Path2D();
   boss.arc(cx, cy, r * 0.22, 0, Math.PI * 2);
-  ctx.fillStyle = PAPER;
+  const bg = ctx.createRadialGradient(cx - r * 0.07, cy - r * 0.08, 0, cx, cy, r * 0.22);
+  bg.addColorStop(0, PAPER);
+  bg.addColorStop(1, shade(KANGA_CYMBAL, -0.2));
+  ctx.fillStyle = bg;
   ctx.fill(boss);
-  wonkyStroke(ctx, boss, Math.max(2, 0.3 * u), { dx: 0.15 * u, dy: 0.15 * u });
 }
 
 function drawButton(
@@ -194,14 +220,37 @@ function drawButton(
   ctx.translate(l.cx, l.buttonCy);
   ctx.scale(scale, scale);
 
+  const R = l.buttonR;
   const path = new Path2D();
-  path.arc(0, 0, l.buttonR, 0, Math.PI * 2);
-  hardShadow(ctx, path, 0.9 * u * shadowScale, 1.1 * u * shadowScale);
-  ctx.fillStyle = fill;
+  path.arc(0, 0, R, 0, Math.PI * 2);
+
+  // The bezel the button sits in, and the shadow it throws — both collapse on
+  // press, which is the depress cue the flat hard shadow used to carry.
+  if (shadowScale > 0) {
+    const bezel = new Path2D();
+    bezel.arc(0, 1.6 * u, R * 1.04, 0, Math.PI * 2);
+    modelledSurface(ctx, bezel, { x: -R * 1.04, y: 1.6 * u - R * 1.04, width: R * 2.08, height: R * 2.08 }, shade(fill, -0.6), Math.max(1, 0.24 * u), { gloss: 0.3 });
+    softShadow(ctx, path, 0.8 * u, 1.8 * u, 3.4 * u, 0.34);
+  }
+
+  // A dome, not a disc: the light pools on the upper left and the lower right
+  // catches a bounce, so it reads as something that can be pushed.
+  const dome = ctx.createRadialGradient(-R * 0.34, -R * 0.4, R * 0.05, 0, 0, R * 1.06);
+  dome.addColorStop(0, shade(fill, 0.46));
+  dome.addColorStop(0.5, fill);
+  dome.addColorStop(0.88, shade(fill, -0.3));
+  dome.addColorStop(1, shade(fill, -0.05));
+  ctx.fillStyle = dome;
   ctx.fill(path);
-  wonkyStroke(ctx, path, strokeWeight(u, true), {
-    dx: keyedRange(state.seed, "button-stroke-dx", 0.35 * u),
-    dy: keyedRange(state.seed, "button-stroke-dy", 0.35 * u),
+
+  const sheen = new Path2D();
+  sheen.ellipse(-R * 0.26, -R * 0.4, R * 0.42, R * 0.24, -0.5, 0, Math.PI * 2);
+  ctx.fillStyle = paperAlpha(pressed ? 0.12 : 0.34);
+  ctx.fill(sheen);
+
+  definitionStroke(ctx, path, Math.max(1, 0.34 * u), shade(fill, -0.55), {
+    dx: keyedRange(state.seed, "button-stroke-dx", 0.2 * u),
+    dy: keyedRange(state.seed, "button-stroke-dy", 0.2 * u),
   });
   ctx.restore();
 }

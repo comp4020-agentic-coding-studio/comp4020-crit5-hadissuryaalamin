@@ -1,7 +1,16 @@
 import type { Stage } from "../canvas.ts";
 import type { Palette } from "../canvas.ts";
 import { PALETTES, PAPER } from "../canvas.ts";
-import { countdownDigit, hardShadow, icon, ROUND_ICON, strokeWeight, wonkyStroke } from "../draw.ts";
+import {
+  countdownDigit,
+  definitionStroke,
+  icon,
+  modelledSurface,
+  paperAlpha,
+  ROUND_ICON,
+  shade,
+  softShadow,
+} from "../draw.ts";
 import { drawCharacter, drawFootRing, neutralPose } from "../character.ts";
 import { keyedRange } from "../../game/rng.ts";
 import type { RoundId } from "../../game/laps.ts";
@@ -210,15 +219,25 @@ function drawIconCard(
   ctx.rotate((-3 * Math.PI) / 180);
   ctx.scale(scale, scale);
 
+  // A printed card lying on the screen: rounded corners, a shaded face, a
+  // lit top edge and a soft shadow under it. It was a flat rectangle with a
+  // 15px ink border.
   const path = new Path2D();
-  path.rect(-w / 2, -h / 2, w, h);
-  hardShadow(ctx, path, 0.9 * u, 1.1 * u);
-  ctx.fillStyle = toPalette.primary;
-  ctx.fill(path);
-  wonkyStroke(ctx, path, strokeWeight(u, true), {
-    dx: keyedRange(info.seed, "card-stroke-dx", 0.35 * u),
-    dy: keyedRange(info.seed, "card-stroke-dy", 0.35 * u),
+  path.roundRect(-w / 2, -h / 2, w, h, 2.2 * u);
+  softShadow(ctx, path, 1.4 * u, 2.4 * u, 5 * u, 0.4);
+  modelledSurface(ctx, path, { x: -w / 2, y: -h / 2, width: w, height: h }, toPalette.primary, Math.max(1, 0.34 * u), {
+    light: 0.24,
+    dark: 0.26,
+    gloss: 0.5,
+    offset: {
+      dx: keyedRange(info.seed, "card-stroke-dx", 0.2 * u),
+      dy: keyedRange(info.seed, "card-stroke-dy", 0.2 * u),
+    },
   });
+  const lip = new Path2D();
+  lip.moveTo(-w / 2 + 2.2 * u, -h / 2 + 0.6 * u);
+  lip.lineTo(w / 2 - 2.2 * u, -h / 2 + 0.6 * u);
+  definitionStroke(ctx, lip, Math.max(1, 0.34 * u), paperAlpha(0.4));
 
   // v1 filled this icon with INK on the card's own primary. Screenshotted with
   // the real icons: a solid ink shape on a saturated ground loses every
@@ -246,11 +265,23 @@ function drawIconCard(
 function drawCastBand(stage: Stage, s: number, info: TransitionInfo): void {
   const { ctx, u } = stage;
 
+  // The band the three of them stand on: a lit strip inset into the card,
+  // with the shadow of the card's own edge falling across its top.
   const band = new Path2D();
-  band.rect(-BAND_HALF_W_U * s, BAND_TOP_U * s, BAND_HALF_W_U * 2 * s, (BAND_BOTTOM_U - BAND_TOP_U) * s);
-  ctx.fillStyle = PAPER;
-  ctx.fill(band);
-  wonkyStroke(ctx, band, strokeWeight(u * 0.8, false), { dx: 0.3 * u, dy: 0.3 * u });
+  band.roundRect(-BAND_HALF_W_U * s, BAND_TOP_U * s, BAND_HALF_W_U * 2 * s, (BAND_BOTTOM_U - BAND_TOP_U) * s, 1.2 * u);
+  modelledSurface(
+    ctx,
+    band,
+    {
+      x: -BAND_HALF_W_U * s,
+      y: BAND_TOP_U * s,
+      width: BAND_HALF_W_U * 2 * s,
+      height: (BAND_BOTTOM_U - BAND_TOP_U) * s,
+    },
+    PAPER,
+    Math.max(1, 0.26 * u),
+    { outline: shade(PAPER, -0.32), light: 0.14, dark: 0.24, gloss: 0.3 },
+  );
 
   for (let i = 0; i < 3 && i < info.racers.length; i++) {
     const racer = info.racers[i];
@@ -274,6 +305,12 @@ function drawCastBand(stage: Stage, s: number, info: TransitionInfo): void {
       // the card saying what they are about to be made to do.
       gaze: { x: (i - 1) * -0.35, y: -0.55 },
       pose: neutralPose(),
+      // A ready pose rather than three figures standing to attention: arms
+      // in, weight forward, the outer two turned slightly toward the centre.
+      armLift: 0.28,
+      armReach: -0.2,
+      lean: (i - 1) * 3,
+      headTilt: (i - 1) * -2,
     });
   }
 }

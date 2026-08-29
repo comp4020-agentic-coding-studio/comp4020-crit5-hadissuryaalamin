@@ -1,6 +1,6 @@
 import type { Stage } from "../canvas.ts";
 import { INK, PALETTES } from "../canvas.ts";
-import { hardShadow, strokeWeight, wonkyStrokeColor } from "../draw.ts";
+import { definitionStroke, paperAlpha, shade, strokeWeight } from "../draw.ts";
 
 const PULSE_PERIOD_MS = 800;
 
@@ -38,12 +38,16 @@ function drawButton(stage: Stage, cx: number, cy: number, elapsedMs: number, fil
 
   const path = new Path2D();
   path.arc(0, 0, radius, 0, Math.PI * 2);
-  // hardShadow is ink-on-ink here and so is invisible - left in for parity
-  // with the attract button rather than special-cased away.
-  hardShadow(ctx, path, 0.9 * u, 1.1 * u);
-  ctx.fillStyle = fill;
+  // A dome, like the attract button. The dead palette's bg IS ink, so there
+  // is no shadow to cast and no dark outline that would read — the modelling
+  // is all in the fill, lit from the same upper left as everything else.
+  const dome = ctx.createRadialGradient(-radius * 0.34, -radius * 0.4, radius * 0.05, 0, 0, radius * 1.06);
+  dome.addColorStop(0, shade(fill, 0.5));
+  dome.addColorStop(0.55, fill);
+  dome.addColorStop(1, shade(fill, -0.3));
+  ctx.fillStyle = dome;
   ctx.fill(path);
-  wonkyStrokeColor(ctx, path, strokeWeight(u, true), { dx: 0.35 * u, dy: 0.35 * u }, fill);
+  definitionStroke(ctx, path, Math.max(1, 0.3 * u), paperAlpha(0.6));
   ctx.restore();
 }
 
@@ -62,10 +66,13 @@ function drawPips(stage: Stage, cleared: readonly boolean[], color: string): voi
     const path = new Path2D();
     path.arc(positions[i], y, pipRadius, 0, Math.PI * 2);
     if (cleared[i]) {
-      ctx.fillStyle = color;
+      const g = ctx.createRadialGradient(positions[i] - pipRadius * 0.3, y - pipRadius * 0.35, 0, positions[i], y, pipRadius);
+      g.addColorStop(0, shade(color, 0.5));
+      g.addColorStop(1, shade(color, -0.22));
+      ctx.fillStyle = g;
       ctx.fill(path);
     }
-    wonkyStrokeColor(ctx, path, strokeWeight(u, false), { dx: 0.35 * u, dy: 0.35 * u }, color);
+    definitionStroke(ctx, path, Math.max(1, 0.3 * u), cleared[i] ? paperAlpha(0.6) : paperAlpha(0.4));
   }
   ctx.restore();
 }
