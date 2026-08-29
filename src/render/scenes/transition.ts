@@ -2,7 +2,7 @@ import type { Stage } from "../canvas.ts";
 import type { Palette } from "../canvas.ts";
 import { PALETTES, PAPER } from "../canvas.ts";
 import { countdownDigit, hardShadow, icon, ROUND_ICON, strokeWeight, wonkyStroke } from "../draw.ts";
-import { drawCharacter, drawFootRing, fittedBlobScale, neutralPose } from "../character.ts";
+import { drawCharacter, drawFootRing, neutralPose } from "../character.ts";
 import { keyedRange } from "../../game/rng.ts";
 import type { RoundId } from "../../game/laps.ts";
 import type { Racer } from "../../game/types.ts";
@@ -57,10 +57,10 @@ const RACER_HEIGHT_U = 16;
 const RACER_FEET_U = 15;
 const RACER_GAP_U = 19;
 
-// The rig's hands and feet are sized off the STAGE unit, so at card scale the
-// default blob comes out wider than a racer's body and the three of them
-// render as twelve black discs — screenshotted, and the same near-solid-ink
-// failure task 016 hit in Follow the Rhythm. `fittedBlobScale` is the fix.
+// Task 017 needed a `blobScale` opt-in here, because the rig sized its hands
+// and feet off the STAGE unit and at card scale the default blob came out
+// wider than a racer's own body. Task 021's rig sizes every mark off the
+// FIGURE, so the card gets correctly-scaled limbs without asking.
 
 export interface TransitionInfo {
   toRound: RoundId;
@@ -266,7 +266,6 @@ function drawCastBand(stage: Stage, s: number, info: TransitionInfo): void {
       heightU: (RACER_HEIGHT_U * s) / u,
       color: racer.colour,
       eye: "normal",
-      blobScale: fittedBlobScale((RACER_HEIGHT_U * s) / u),
       // Every preset but "grin" collapses into an unreadable dark bar at this
       // size — screenshotted "gritted" on the middle racer first, and it read
       // as a moustache. Variety comes from the gaze instead.

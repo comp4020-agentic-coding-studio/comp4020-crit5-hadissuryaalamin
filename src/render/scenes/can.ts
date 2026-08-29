@@ -1,6 +1,6 @@
 import type { Stage } from "../canvas.ts";
 import { gauge, hardShadow, strokeWeight, wonkyStroke } from "../draw.ts";
-import { drawCharacter, drawFootRing, fittedBlobScale, neutralPose, squashPose } from "../character.ts";
+import { drawCharacter, drawFootRing, neutralPose, squashPose } from "../character.ts";
 import type { CanConfig, CanState } from "../../game/can.ts";
 import type { Racer } from "../../game/types.ts";
 import { PAD_BAND_FRACTION } from "../pads.ts";
@@ -169,10 +169,6 @@ function drawCanAndCharacter(
     mouth: launchT > 0 ? "howl" : "gritted",
     gaze: launchT > 0 ? { x: 0, y: -0.9 } : undefined,
     pose: squashPose(joltT * 0.5),
-    // Without this the rig's stage-unit hands and feet come out as six discs
-    // each about as wide as the figure's own body — the defect task 017 added
-    // fittedBlobScale for, never applied here because this scene predates it.
-    blobScale: fittedBlobScale((CHAR_HEIGHT_U * s) / stageU),
   });
 
   ctx.save();

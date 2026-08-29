@@ -3,7 +3,6 @@ import { PALETTES, PAPER } from "../canvas.ts";
 import { hardShadow, strokeWeight, wonkyStroke } from "../draw.ts";
 import {
   drawCharacter,
-  fittedBlobScale,
   handPositions,
   neutralPose,
   type CharacterSpec,
@@ -149,12 +148,6 @@ function drawKangaroo(stage: Stage, l: AttractLayout, seed: number): void {
     // the arms are diagonal and the figure reads as a musician.
     armLift: 0.95,
     armReach: 0.75,
-    // The rig sizes hands and feet off the STAGE unit, so at this figure's
-    // height the default foot blob is a 31px black disc on a 25px leg and the
-    // mascot reads as being on castors. Screenshotted next with a flat 0.55,
-    // which fixed desktop and left the phone's feet as pinheads — the stage
-    // unit moves between viewports and a fixed scale cannot track it.
-    blobScale: fittedBlobScale(l.kangaH / u),
   };
 
   const hands = handPositions(stage, spec);

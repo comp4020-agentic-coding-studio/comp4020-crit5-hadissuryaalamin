@@ -79,7 +79,7 @@ import {
   type PadGlow,
   type PadPressState,
 } from "./render/pads.ts";
-import { drawCharacter, fittedBlobScale, neutralPose, squashPose } from "./render/character.ts";
+import { drawCharacter, neutralPose, squashPose } from "./render/character.ts";
 
 // v2 rebuild step 2 (epic build-order) wired the gauntlet's phase machine to
 // resolve every round to a 3-racer placing via a podium screen, instead of a
@@ -425,11 +425,6 @@ function drawIncomingRoundStatic(): void {
       eye: "normal",
       mouth: "neutral",
       pose: neutralPose(),
-      // Without this the rig's stage-unit hands and feet come out as six
-      // black discs each the width of the figure's own body, and they sit
-      // right where the transition card does not quite cover them. Screenshot
-      // caught it behind the card at both viewports.
-      blobScale: fittedBlobScale(20),
     });
   }
 }
