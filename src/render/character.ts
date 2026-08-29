@@ -87,6 +87,15 @@ export interface CharacterSpec {
   // chest (-). A cymbal crash is one sweep of both at once.
   armLift?: number;
   armReach?: number;
+
+  // Scales the blob at the end of each limb — the hands and the feet. The rig
+  // sizes that blob off the STAGE unit rather than off the figure, which is
+  // right for a character drawn at roughly stage scale and badly wrong for one
+  // drawn much smaller: on the transition card the default blob comes out
+  // WIDER than the racer's own body, so three racers render as twelve black
+  // discs. 1 (the default) is the rig's existing geometry, unchanged, so every
+  // scene that omits this draws exactly as it did before.
+  blobScale?: number;
 }
 
 // Where the character's hands end up, in STAGE coordinates, with the pose's
@@ -116,7 +125,7 @@ export function handPositions(
   return {
     left: toStage(armGeometry(spec, bodyH, -1).to),
     right: toStage(armGeometry(spec, bodyH, 1).to),
-    radius: 2.2 * u,
+    radius: limbBlobRadius(u, spec),
   };
 }
 
@@ -293,6 +302,7 @@ function drawLimbSegment(
   to: { x: number; y: number },
   weight: number,
   blobR: number,
+  blobWeight: number,
   color: string,
   strokeOff: { dx: number; dy: number },
 ): void {
@@ -305,7 +315,21 @@ function drawLimbSegment(
   blob.arc(to.x, to.y, blobR, 0, Math.PI * 2);
   ctx.fillStyle = color;
   ctx.fill(blob);
-  wonkyStroke(ctx, blob, strokeWeight(blobR * 2, false), strokeOff);
+  wonkyStroke(ctx, blob, blobWeight, strokeOff);
+}
+
+export function limbBlobRadius(u: number, spec: CharacterSpec): number {
+  return 2.2 * u * (spec.blobScale ?? 1);
+}
+
+// The `blobScale` that puts a figure's hands and feet at about 5% of its own
+// height, whatever the viewport. The rig's default blob is a flat 2.2 stage
+// units, so the right scale is 0.05 x heightU / 2.2 — the 44 below. Use this
+// rather than a hand-picked constant: a fixed scale that looks right at
+// 900x700 is wrong at 390x844, because the stage unit moves and the figure's
+// height in units does not.
+export function fittedBlobScale(heightU: number): number {
+  return heightU / 44;
 }
 
 function drawLimbs(
@@ -318,17 +342,27 @@ function drawLimbs(
   const botW = bodyH * 0.5;
   const bottomBody = -bodyH * 0.15;
   const limbWeight = strokeWeight(u, false);
-  const blobR = 2.2 * u;
+  const blobScale = spec.blobScale ?? 1;
+  const blobR = limbBlobRadius(u, spec);
+  // The blob's own outline. The rig's original expression passes a PIXEL
+  // radius to `strokeWeight`, which expects the stage unit; it happens to land
+  // on a sensible weight at the default blob size and on a fully inked disc at
+  // anything smaller, because `strokeWeight`'s 4px floor and 1.2x multiplier
+  // are both sized for `u`. The default path is therefore left exactly as it
+  // was — every shipped scene draws byte-identically — and only a scaled blob
+  // takes a weight derived from the blob itself.
+  const blobWeight =
+    blobScale === 1 ? strokeWeight(blobR * 2, false) : Math.max(2, blobR * 0.55);
 
   for (const side of [-1, 1]) {
     const { from, to } = armGeometry(spec, bodyH, side);
-    drawLimbSegment(ctx, from, to, limbWeight, blobR, spec.color, strokeOff);
+    drawLimbSegment(ctx, from, to, limbWeight, blobR, blobWeight, spec.color, strokeOff);
   }
 
   for (const side of [-1, 1]) {
     const from = { x: (side * botW) / 2 / 0.9, y: bottomBody };
     const to = { x: from.x, y: 0 };
-    drawLimbSegment(ctx, from, to, limbWeight, blobR, spec.color, strokeOff);
+    drawLimbSegment(ctx, from, to, limbWeight, blobR, blobWeight, spec.color, strokeOff);
   }
 }
 

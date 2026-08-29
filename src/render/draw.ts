@@ -83,37 +83,6 @@ export function hardShadow(
   ctx.restore();
 }
 
-export function dashedBand(
-  ctx: CanvasRenderingContext2D,
-  cx: number,
-  cy: number,
-  innerR: number,
-  outerR: number,
-  fill: string,
-): void {
-  ctx.save();
-  ctx.beginPath();
-  ctx.arc(cx, cy, outerR, 0, Math.PI * 2);
-  ctx.arc(cx, cy, innerR, 0, Math.PI * 2, true);
-  ctx.closePath();
-  ctx.fillStyle = fill;
-  ctx.globalAlpha = 0.35;
-  ctx.fill();
-  ctx.globalAlpha = 1;
-
-  ctx.setLineDash([outerR * 0.12, outerR * 0.08]);
-  ctx.lineWidth = Math.max(2, outerR * 0.02);
-  ctx.strokeStyle = INK;
-  ctx.beginPath();
-  ctx.arc(cx, cy, outerR, 0, Math.PI * 2);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.arc(cx, cy, innerR, 0, Math.PI * 2);
-  ctx.stroke();
-  ctx.setLineDash([]);
-  ctx.restore();
-}
-
 // A tall rounded capsule, clipped, filled from the bottom up to `fillFrac`.
 export function gauge(
   ctx: CanvasRenderingContext2D,

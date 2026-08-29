@@ -72,31 +72,6 @@ export function playTapBlip(synth: Synth): void {
   osc.stop(now + durationSec);
 }
 
-// Epic section 10: square 300 -> 380 Hz over 60ms. Fires on every Oh No tap
-// that keeps the balloon inflating (i.e. doesn't burst it) - the balloon's
-// own tap sound, distinct from the generic tap blip.
-export function playInflatePuff(synth: Synth): void {
-  if (!synth.ctx || !synth.master) return;
-  const ctx = synth.ctx;
-  const master = synth.master;
-  const now = ctx.currentTime;
-  const durationSec = 0.06;
-
-  const osc = ctx.createOscillator();
-  osc.type = "square";
-  osc.frequency.setValueAtTime(300, now);
-  osc.frequency.exponentialRampToValueAtTime(380, now + durationSec);
-
-  const gain = ctx.createGain();
-  gain.gain.setValueAtTime(0.2, now);
-  gain.gain.linearRampToValueAtTime(0.0001, now + durationSec);
-
-  osc.connect(gain);
-  gain.connect(master);
-  osc.start(now);
-  osc.stop(now + durationSec);
-}
-
 // Epic section 10: white noise 250ms + square 400 -> 60 Hz over 250ms.
 // Fires once when Oh No's fuse reaches zero and the bomb goes off. (The
 // machinery survives v1 unchanged; only what sets it off has changed — the

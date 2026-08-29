@@ -21,6 +21,7 @@ import {
   playPadTone,
   playSlip,
   playTapBlip,
+  playTransitionSting,
   playWinChord,
   setMuted,
 } from "./audio/synth.ts";
@@ -66,12 +67,13 @@ import { drawPattern, PATTERN_RESOLVE_HOLD_MS } from "./render/scenes/pattern.ts
 import {
   createPadPressState,
   drawFourPads,
+  PAD_BAND_FRACTION,
   pressPad,
   tickPadPress,
   type PadGlow,
   type PadPressState,
 } from "./render/pads.ts";
-import { drawCharacter, neutralPose, squashPose } from "./render/character.ts";
+import { drawCharacter, fittedBlobScale, neutralPose, squashPose } from "./render/character.ts";
 
 // v2 rebuild step 2 (epic build-order) wired the gauntlet's phase machine to
 // resolve every round to a 3-racer placing via a podium screen, instead of a
@@ -351,12 +353,21 @@ function drawIncomingRoundStatic(): void {
     drawCharacter(stage, {
       seed: i + 1,
       cx: spacing * (i + 1),
-      feetY: stage.height * 0.7,
-      heightU: 22,
+      // Down on the pad band's top edge, where a real round stands its cast.
+      // At 0.7 the preview's heads pushed out from under the transition card
+      // at phone size and the routine showed the same three racers twice, in
+      // two rows.
+      feetY: stage.height * (1 - PAD_BAND_FRACTION),
+      heightU: 20,
       color: gauntlet.racers[i].colour,
       eye: "normal",
       mouth: "neutral",
       pose: neutralPose(),
+      // Without this the rig's stage-unit hands and feet come out as six
+      // black discs each the width of the figure's own body, and they sit
+      // right where the transition card does not quite cover them. Screenshot
+      // caught it behind the card at both viewports.
+      blobScale: fittedBlobScale(20),
     });
   }
 }
@@ -368,8 +379,12 @@ function drawThrowawayRound(): void {
     drawCharacter(stage, {
       seed: i + 1,
       cx: spacing * (i + 1),
-      feetY: stage.height * 0.7,
-      heightU: 22,
+      // Down on the pad band's top edge, where a real round stands its cast.
+      // At 0.7 the preview's heads pushed out from under the transition card
+      // at phone size and the routine showed the same three racers twice, in
+      // two rows.
+      feetY: stage.height * (1 - PAD_BAND_FRACTION),
+      heightU: 20,
       color: gauntlet.racers[i].colour,
       eye: progress > 0.5 ? "wide" : "normal",
       mouth: progress > 0.5 ? "gritted" : "neutral",
@@ -399,8 +414,15 @@ function frame(now: number): void {
 
   if (gauntlet.phase === "transition") {
     transitionElapsedMs += dtMs;
+    // t=0.45s, the instant the ink wipe finishes crossing the screen (epic v1
+    // section 8). The flag exists so a long frame can never fire it twice.
+    // It was there from v1 and the sound function was there from v1, but
+    // nothing ever joined them up, so the transition has been running silent
+    // this whole time — caught by the new dead-code sensor, not by any of
+    // typecheck, build or vitest, all of which were green over it.
     if (!transitionStingFired && transitionElapsedMs >= TRANSITION_STING_MS) {
       transitionStingFired = true;
+      playTransitionSting(synth);
     }
     if (transitionElapsedMs >= TRANSITION_DURATION_MS) {
       gauntlet = transitionFinished(gauntlet);
@@ -580,7 +602,12 @@ function frame(now: number): void {
   if (gauntlet.phase === "attract") {
     drawAttract(stage, attractState);
   } else if (gauntlet.phase === "transition") {
-    drawTransition(stage, transitionElapsedMs, { toRound: currentRound(gauntlet), seed: transitionSeed }, drawIncomingRoundStatic);
+    drawTransition(
+      stage,
+      transitionElapsedMs,
+      { toRound: currentRound(gauntlet), seed: transitionSeed, racers: gauntlet.racers },
+      drawIncomingRoundStatic,
+    );
   } else if (gauntlet.phase === "round" && currentRound(gauntlet) === "shake") {
     drawCan(stage, canState, CAN_LAPS[gauntlet.lap], gauntlet.racers);
     drawFourPads(stage, padPressState);
@@ -635,3 +662,4 @@ function frame(now: number): void {
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
+
