@@ -3,6 +3,7 @@ import { PALETTES, PAPER } from "../canvas.ts";
 import { hardShadow, strokeWeight, wonkyStroke } from "../draw.ts";
 import {
   drawCharacter,
+  drawFootRing,
   neutralPose,
   squashPose,
   stretchPose,
@@ -87,7 +88,7 @@ export function drawClimber(
     const behind = leaderFloor - r.floor;
     const feetY = Math.min(maxFeetY, anchorY + behind * TRAIL_U * u);
 
-    if (racer.isHuman) drawHumanMarker(ctx, cx, feetY, u, racer.colour);
+    if (racer.isHuman) drawFootRing(ctx, { cx, feetY, u, color: racer.colour });
 
     const finished = r.finishOrder !== null;
     const leading = behind === 0;
@@ -151,25 +152,6 @@ function mouthFor(
   if (msSince(r.lastSlipAtMs, nowMs) < SLIP_REACTION_MS) return "howl";
   if (r.stunRemaining > 0) return "wobble";
   return leading ? "grin" : "gritted";
-}
-
-// The chunky outline ring under racer 0's feet (epic 8.2) — three figures of
-// the same rig appear side by side here for the first time in a race, and a
-// stranger must never have to work out which one is theirs. Drawn as a ring
-// (even-odd donut) rather than a filled disc so it never reads as a shadow.
-function drawHumanMarker(ctx: CanvasRenderingContext2D, cx: number, feetY: number, u: number, color: string): void {
-  const cy = feetY + 2.2 * u;
-  const path = new Path2D();
-  path.ellipse(cx, cy, 9.5 * u, 3.2 * u, 0, 0, Math.PI * 2);
-  path.ellipse(cx, cy, 6.6 * u, 1.7 * u, 0, 0, Math.PI * 2);
-  ctx.save();
-  ctx.fillStyle = color;
-  ctx.fill(path, "evenodd");
-  ctx.restore();
-
-  const outer = new Path2D();
-  outer.ellipse(cx, cy, 9.5 * u, 3.2 * u, 0, 0, Math.PI * 2);
-  wonkyStroke(ctx, outer, strokeWeight(u * 0.7, false), { dx: 0.2 * u, dy: 0.2 * u });
 }
 
 // The skyscraper: one solid column with a floor line per storey, rather than

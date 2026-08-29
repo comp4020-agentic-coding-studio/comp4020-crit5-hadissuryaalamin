@@ -3,6 +3,7 @@ import { INK, PALETTES, PAPER } from "../canvas.ts";
 import { hardShadow, strokeWeight, wonkyStroke } from "../draw.ts";
 import {
   drawCharacter,
+  drawFootRing,
   handPositions,
   neutralPose,
   squashPose,
@@ -87,6 +88,12 @@ const SEAT_FOOTPRINT_U = 46 / 3;
 // and its cymbals at the top of the swing, not just its standing height).
 const STACK_U = 78;
 const MAX_SCENE_SCALE = 1.85;
+
+// The human's foot ring (character.ts's drawFootRing), in THIS scene's unit
+// rather than the rig's default. Hand-tuned when the scene was built and kept
+// exactly as it was through the lift: this scene draws smaller than Climber
+// and Oh No, and the rig's default ring would swamp a racer here.
+const SCENE_FOOT_RING = { drop: 1.8, outerRx: 8.6, outerRy: 2.9, innerRx: 6.0, innerRy: 1.5 };
 
 export function patternTurnPulse(elapsedMs: number): number {
   return 0.5 + 0.5 * Math.sin((elapsedMs / 1000 / TURN_PULSE_PERIOD_SEC) * Math.PI * 2);
@@ -443,7 +450,7 @@ function drawRacer(
   const finished = !r.eliminated && r.step >= state.pattern.length && state.phase === "playback";
 
   if (racer.isHuman) {
-    drawHumanMarker(ctx, cx, feetY, l.s, racer.colour);
+    drawFootRing(ctx, { cx, feetY, u: l.s, color: racer.colour, ...SCENE_FOOT_RING });
     if (owing) drawTurnHalo(ctx, cx, feetY, l.s, patternTurnPulse(state.elapsedMs));
   }
 
@@ -608,30 +615,6 @@ function drawChipRow(
 // ---------------------------------------------------------------------------
 // The human's own affordances
 // ---------------------------------------------------------------------------
-
-// The chunky outline ring under racer 0's feet (epic 8.2). Duplicated from the
-// Climber and Oh No scenes deliberately: lifting it into
-// src/render/character.ts is task 011's file and belongs to a later pass.
-function drawHumanMarker(
-  ctx: CanvasRenderingContext2D,
-  cx: number,
-  feetY: number,
-  s: number,
-  color: string,
-): void {
-  const cy = feetY + 1.8 * s;
-  const path = new Path2D();
-  path.ellipse(cx, cy, 8.6 * s, 2.9 * s, 0, 0, Math.PI * 2);
-  path.ellipse(cx, cy, 6.0 * s, 1.5 * s, 0, 0, Math.PI * 2);
-  ctx.save();
-  ctx.fillStyle = color;
-  ctx.fill(path, "evenodd");
-  ctx.restore();
-
-  const outer = new Path2D();
-  outer.ellipse(cx, cy, 8.6 * s, 2.9 * s, 0, 0, Math.PI * 2);
-  wonkyStroke(ctx, outer, strokeWeight(s * 0.7, false), { dx: 0.2 * s, dy: 0.2 * s });
-}
 
 // A paper halo that breathes around the human while they still owe hits, and
 // stops dead the instant they finish the pattern. Deliberately colourless: a

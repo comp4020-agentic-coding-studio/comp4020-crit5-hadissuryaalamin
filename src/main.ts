@@ -66,7 +66,7 @@ import { drawAttract, type AttractState } from "./render/scenes/attract.ts";
 import { drawTransition, TRANSITION_DURATION_MS, TRANSITION_STING_MS } from "./render/scenes/transition.ts";
 import { drawDeadFurniture, drawWinBurst, WIN_BURST_MS } from "./render/scenes/dead.ts";
 import { drawPodium, PODIUM_DURATION_MS } from "./render/scenes/podium.ts";
-import { drawCan } from "./render/scenes/can.ts";
+import { CAN_LAUNCH_HOLD_MS, drawCan } from "./render/scenes/can.ts";
 import { climberGlowPulse, drawClimber } from "./render/scenes/climber.ts";
 import { bombPassPulse, drawBomb, EXPLOSION_HOLD_MS } from "./render/scenes/bomb.ts";
 import { drawPattern, PATTERN_RESOLVE_HOLD_MS } from "./render/scenes/pattern.ts";
@@ -127,7 +127,12 @@ let throwawayRng: Rng = mulberry32(0);
 // alternate through all four pads in a fixed cycle (guaranteeing altGain
 // whenever they don't error), which is enough to make them a real contest
 // without needing pad-reading logic of their own.
+// `canLaunchMs` holds the can scene on screen after the round resolves, so the
+// launch is seen at the can instead of heard over the podium — the same shape
+// `bombExplodeMs` and `patternResolveMs` use, and the reason task 018 flagged
+// this round as the one terminal moment with no hold of its own.
 let canState: CanState = createCan();
+let canLaunchMs = 0;
 let canCpuTimers: [CpuTimerState, CpuTimerState] = [
   createCpuTimer(CPU_LAPS[1], mulberry32(3)),
   createCpuTimer(CPU_LAPS[1], mulberry32(4)),
@@ -228,6 +233,7 @@ function enterCurrentRound(): void {
   ];
 
   canState = createCan();
+  canLaunchMs = 0;
   const canSeed = Math.floor(Math.random() * 0xffffffff);
   canCpuRng = mulberry32(canSeed);
   canCpuTimers = [
@@ -471,11 +477,17 @@ function frame(now: number): void {
 
     const wasPlaying = canState.status === "playing";
     canState = tickCan(canState, config, dt);
-    if (wasPlaying && canState.status === "resolved") {
-      playCanLaunch(synth);
-      const placing = resolveCanPlacing(canState);
-      gauntlet = roundResolved(gauntlet, placing);
-      podiumElapsedMs = 0;
+    // The launch fires on the frame the round resolves, and the placing is
+    // then held back for CAN_LAUNCH_HOLD_MS so the cans are actually seen to
+    // go up. Without the hold the podium took over on the same frame and the
+    // 700ms sound played over it (task 018's finding).
+    if (wasPlaying && canState.status === "resolved") playCanLaunch(synth);
+    if (canState.status === "resolved") {
+      canLaunchMs += dtMs;
+      if (canLaunchMs >= CAN_LAUNCH_HOLD_MS) {
+        gauntlet = roundResolved(gauntlet, resolveCanPlacing(canState));
+        podiumElapsedMs = 0;
+      }
     }
   } else if (gauntlet.phase === "round" && currentRound(gauntlet) === "climber") {
     const config = CLIMBER_LAPS[gauntlet.lap];
@@ -669,7 +681,7 @@ function frame(now: number): void {
       drawIncomingRoundStatic,
     );
   } else if (gauntlet.phase === "round" && currentRound(gauntlet) === "shake") {
-    drawCan(stage, canState, CAN_LAPS[gauntlet.lap], gauntlet.racers);
+    drawCan(stage, canState, CAN_LAPS[gauntlet.lap], gauntlet.racers, canLaunchMs);
     drawFourPads(stage, padPressState);
   } else if (gauntlet.phase === "round" && currentRound(gauntlet) === "climber") {
     drawClimber(stage, climberState, CLIMBER_LAPS[gauntlet.lap], gauntlet.racers, climberSeed);
@@ -718,6 +730,7 @@ function frame(now: number): void {
   }
 
   padPressState = tickPadPress(padPressState, dtMs);
+
 
   requestAnimationFrame(frame);
 }

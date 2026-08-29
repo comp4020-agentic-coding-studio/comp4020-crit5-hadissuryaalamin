@@ -2,7 +2,7 @@ import type { Stage } from "../canvas.ts";
 import type { Palette } from "../canvas.ts";
 import { PALETTES, PAPER } from "../canvas.ts";
 import { countdownDigit, hardShadow, icon, ROUND_ICON, strokeWeight, wonkyStroke } from "../draw.ts";
-import { drawCharacter, fittedBlobScale, neutralPose } from "../character.ts";
+import { drawCharacter, drawFootRing, fittedBlobScale, neutralPose } from "../character.ts";
 import { keyedRange } from "../../game/rng.ts";
 import type { RoundId } from "../../game/laps.ts";
 import type { Racer } from "../../game/types.ts";
@@ -47,6 +47,11 @@ const CARD_ICON_SIZE_U = 20;
 const BAND_TOP_U = -2;
 const BAND_BOTTOM_U = 20;
 const BAND_HALF_W_U = 29;
+
+// The human's foot ring (character.ts's drawFootRing), in the CARD unit. The
+// smallest of the three geometries in the game — the card's racers are the
+// smallest figures anywhere — and kept exactly as hand-tuned through the lift.
+const CARD_FOOT_RING = { drop: 1.5, outerRx: 7.2, outerRy: 2.4, innerRx: 5.0, innerRy: 1.3 };
 
 const RACER_HEIGHT_U = 16;
 const RACER_FEET_U = 15;
@@ -252,7 +257,7 @@ function drawCastBand(stage: Stage, s: number, info: TransitionInfo): void {
     const cx = (i - 1) * RACER_GAP_U * s;
     const feetY = RACER_FEET_U * s;
 
-    if (racer.isHuman) drawHumanMarker(ctx, cx, feetY, s, racer.colour);
+    if (racer.isHuman) drawFootRing(ctx, { cx, feetY, u: s, color: racer.colour, ...CARD_FOOT_RING });
 
     drawCharacter(stage, {
       seed: racer.character + 1,
@@ -272,32 +277,6 @@ function drawCastBand(stage: Stage, s: number, info: TransitionInfo): void {
       pose: neutralPose(),
     });
   }
-}
-
-// The chunky outline ring under racer 0's feet (epic 8.2), so a stranger never
-// has to work out which of the three is theirs. Duplicated from the Climber,
-// Oh No and Rhythm scenes deliberately — lifting it into
-// src/render/character.ts is task 011's file and belongs to a later pass, and
-// this task is barred from reworking a rig three shipped scenes depend on.
-function drawHumanMarker(
-  ctx: CanvasRenderingContext2D,
-  cx: number,
-  feetY: number,
-  s: number,
-  color: string,
-): void {
-  const cy = feetY + 1.5 * s;
-  const path = new Path2D();
-  path.ellipse(cx, cy, 7.2 * s, 2.4 * s, 0, 0, Math.PI * 2);
-  path.ellipse(cx, cy, 5.0 * s, 1.3 * s, 0, 0, Math.PI * 2);
-  ctx.save();
-  ctx.fillStyle = color;
-  ctx.fill(path, "evenodd");
-  ctx.restore();
-
-  const outer = new Path2D();
-  outer.ellipse(cx, cy, 7.2 * s, 2.4 * s, 0, 0, Math.PI * 2);
-  wonkyStroke(ctx, outer, strokeWeight(s * 0.7, false), { dx: 0.2 * s, dy: 0.2 * s });
 }
 
 function drawCountdown(stage: Stage, elapsedMs: number, seed: number): void {

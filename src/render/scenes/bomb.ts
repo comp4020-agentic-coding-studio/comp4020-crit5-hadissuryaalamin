@@ -3,6 +3,7 @@ import { INK, PALETTES, PAPER } from "../canvas.ts";
 import { hardShadow, strokeWeight, wonkyStroke, wonkyStrokeColor } from "../draw.ts";
 import {
   drawCharacter,
+  drawFootRing,
   neutralPose,
   squashPose,
   stretchPose,
@@ -133,7 +134,7 @@ export function drawBomb(
     const holding = state.holder === i;
     const cx = seatX(i);
 
-    if (racer.isHuman) drawHumanMarker(ctx, cx, feetY, s, racer.colour);
+    if (racer.isHuman) drawFootRing(ctx, { cx, feetY, u: s, color: racer.colour });
 
     // Everyone leans away from the bomb; the holder cannot, which is exactly
     // the joke. The lean is a rotation about the feet, applied around the rig
@@ -469,29 +470,4 @@ function drawGround(stage: Stage, feetY: number, color: string, seed: number, u:
   ctx.lineWidth = 1.4 * u;
   ctx.strokeStyle = color;
   ctx.stroke(line);
-}
-
-// The chunky outline ring under racer 0's feet (epic 8.2), so a stranger never
-// has to work out which of three identical figures is theirs. Duplicated from
-// the Climber scene deliberately: lifting it into src/render/character.ts is
-// task 011's file and was left to a later pass (see updates/014).
-function drawHumanMarker(
-  ctx: CanvasRenderingContext2D,
-  cx: number,
-  feetY: number,
-  u: number,
-  color: string,
-): void {
-  const cy = feetY + 2.2 * u;
-  const path = new Path2D();
-  path.ellipse(cx, cy, 9.5 * u, 3.2 * u, 0, 0, Math.PI * 2);
-  path.ellipse(cx, cy, 6.6 * u, 1.7 * u, 0, 0, Math.PI * 2);
-  ctx.save();
-  ctx.fillStyle = color;
-  ctx.fill(path, "evenodd");
-  ctx.restore();
-
-  const outer = new Path2D();
-  outer.ellipse(cx, cy, 9.5 * u, 3.2 * u, 0, 0, Math.PI * 2);
-  wonkyStroke(ctx, outer, strokeWeight(u * 0.7, false), { dx: 0.2 * u, dy: 0.2 * u });
 }

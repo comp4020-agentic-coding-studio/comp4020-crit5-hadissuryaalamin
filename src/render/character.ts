@@ -531,3 +531,56 @@ function drawMouth(
 
   wonkyStroke(ctx, path, strokeWeight(u * 0.6, false), strokeOff);
 }
+
+// ---------------------------------------------------------------------------
+// The human's foot ring (epic 8.2)
+// ---------------------------------------------------------------------------
+
+// The chunky outline ring under the human racer's feet. Three figures of this
+// same rig stand side by side in every round, and a stranger must never have
+// to work out which one is theirs. Drawn as an even-odd donut rather than a
+// filled disc so it never reads as a shadow.
+//
+// It lived as a private copy in the Climber scene, then in Oh No, then in
+// Rhythm, then on the transition card — four copies, flagged by tasks 014, 016
+// and 017 and lifted here. The three geometries those copies had were HAND
+// TUNED per scene and are not a uniform scale of one another, so the lift
+// keeps them exactly rather than averaging them into a single ring: the
+// defaults below are the Climber/Oh No numbers, and the two scenes that drew a
+// smaller ring pass their own. A scene that omits them draws precisely what it
+// drew before.
+export interface FootRingSpec {
+  cx: number;
+  feetY: number;
+  // The unit the geometry below is measured in — the STAGE unit in Climber and
+  // Oh No, each scene's own smaller unit in Rhythm and on the transition card.
+  u: number;
+  color: string;
+  // How far below the feet the ring sits.
+  drop?: number;
+  outerRx?: number;
+  outerRy?: number;
+  innerRx?: number;
+  innerRy?: number;
+}
+
+export function drawFootRing(ctx: CanvasRenderingContext2D, spec: FootRingSpec): void {
+  const { cx, u, color } = spec;
+  const cy = spec.feetY + (spec.drop ?? 2.2) * u;
+  const outerRx = (spec.outerRx ?? 9.5) * u;
+  const outerRy = (spec.outerRy ?? 3.2) * u;
+  const innerRx = (spec.innerRx ?? 6.6) * u;
+  const innerRy = (spec.innerRy ?? 1.7) * u;
+
+  const path = new Path2D();
+  path.ellipse(cx, cy, outerRx, outerRy, 0, 0, Math.PI * 2);
+  path.ellipse(cx, cy, innerRx, innerRy, 0, 0, Math.PI * 2);
+  ctx.save();
+  ctx.fillStyle = color;
+  ctx.fill(path, "evenodd");
+  ctx.restore();
+
+  const outer = new Path2D();
+  outer.ellipse(cx, cy, outerRx, outerRy, 0, 0, Math.PI * 2);
+  wonkyStroke(ctx, outer, strokeWeight(u * 0.7, false), { dx: 0.2 * u, dy: 0.2 * u });
+}
