@@ -112,24 +112,6 @@ export function gauge(
   wonkyStroke(ctx, path, strokeWeight(width, false), { dx: width * 0.03, dy: width * 0.03 });
 }
 
-export function pad(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-  fill: string | null,
-  strokeOffset: StrokeOffset,
-): void {
-  const path = new Path2D();
-  path.rect(x, y, width, height);
-  if (fill) {
-    ctx.fillStyle = fill;
-    ctx.fill(path);
-  }
-  wonkyStroke(ctx, path, strokeWeight(width, true), strokeOffset);
-}
-
 export type IconKind = "bomb" | "can" | "tower" | "cymbals";
 
 // Which icon represents each round — used by the attract screen's logo

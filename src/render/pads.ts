@@ -1,6 +1,6 @@
 import type { Stage } from "./canvas.ts";
-import { INK, PAPER } from "./canvas.ts";
-import { hardShadow, pad } from "./draw.ts";
+import { PAPER } from "./canvas.ts";
+import { definitionStroke, inkAlpha, modelledSurface, paperAlpha, softShadow, type Box } from "./draw.ts";
 
 // The four-pad control surface (epic v2 section 4). Colour identity is fixed
 // and never reassigned — pad 0 is always RED, etc. — because colour identity
@@ -79,21 +79,75 @@ export function drawFourPads(stage: Stage, pressState: PadPressState, glow?: Pad
     ctx.scale(scale, scale);
     ctx.translate(-cx, -cy);
 
-    if (!pressed) {
-      const shadowPath = new Path2D();
-      shadowPath.rect(x, bandY, padWidth, bandHeight);
-      hardShadow(ctx, shadowPath, 0.9 * u, 1.1 * u);
-    }
-    pad(ctx, x, bandY, padWidth, bandHeight, PAD_COLORS[index], { dx: 0.35 * u, dy: 0.35 * u });
+    drawModelledPad(ctx, x, bandY, padWidth, bandHeight, u, PAD_COLORS[index], pressed);
     if (isGlowing) drawGlowInset(ctx, x, bandY, padWidth, bandHeight, u);
     ctx.restore();
   }
 }
 
+// A pad, as a physical arcade button rather than a flat rectangle in a black
+// grid (task 021). It is the loudest thing on screen and it was, before this,
+// four flat fills fenced in 15px of ink.
+//
+// THE FOUR HUES ARE UNTOUCHED. `PAD_COLORS` above is the palette; everything
+// here is light falling on it — a gradient across the face, an inner bevel, a
+// gloss where the light hits, a soft shadow underneath, and a thin definition
+// stroke in a darkened version of the pad's OWN colour. Colour is how this
+// game teaches itself wordlessly and has to survive muting and colourblind
+// play, so no shading step is allowed to shift a hue toward its neighbour.
+function drawModelledPad(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  u: number,
+  color: string,
+  pressed: boolean,
+): void {
+  // A hairline gutter, so the four pads read as four objects without needing
+  // a black bar between them to do it.
+  const gap = 0.5 * u;
+  const px = x + gap;
+  const pw = w - gap * 2;
+  const r = Math.min(pw, h) * 0.16;
+
+  const face = new Path2D();
+  face.roundRect(px, y + gap, pw, h - gap * 2, r);
+  const box: Box = { x: px, y: y + gap, width: pw, height: h - gap * 2 };
+
+  // The seat the button sits in — visible as a dark lip below a pad at rest,
+  // and closed up when the pad is depressed. This is the depress cue that
+  // used to be a collapsing hard shadow.
+  if (!pressed) {
+    const seat = new Path2D();
+    seat.roundRect(px, y + gap + 1.2 * u, pw, h - gap * 2, r);
+    ctx.fillStyle = inkAlpha(0.55);
+    ctx.fill(seat);
+    softShadow(ctx, face, 0, 1.4 * u, 2.4 * u, 0.3);
+  }
+
+  modelledSurface(ctx, face, box, color, Math.max(1, 0.28 * u), {
+    light: pressed ? 0.14 : 0.34,
+    dark: pressed ? 0.4 : 0.3,
+    bevel: pressed ? 0.5 : 1,
+    gloss: pressed ? 0.25 : 0.9,
+  });
+
+  // The top-edge catch light: one bright line along the lip, which is what
+  // makes a button look like it has a top rather than a border.
+  if (!pressed) {
+    const lip = new Path2D();
+    lip.moveTo(px + r, y + gap + 0.5 * u);
+    lip.lineTo(px + pw - r, y + gap + 0.5 * u);
+    definitionStroke(ctx, lip, Math.max(1, 0.4 * u), paperAlpha(0.35));
+  }
+}
+
 // The "this one" marker on a glowing pad: a chunky inset ring in PAPER, the
-// same ink-outlined vocabulary as everything else. Reads instantly at a
-// glance and across the whole pad band, and does not disturb the pad's own
-// fixed colour, which is the input language (epic section 4).
+// same vocabulary as everything else. Reads instantly at a glance and across
+// the whole pad band, and does not disturb the pad's own fixed colour, which
+// is the input language (epic section 4).
 function drawGlowInset(
   ctx: CanvasRenderingContext2D,
   x: number,
@@ -112,7 +166,7 @@ function drawGlowInset(
   ctx.strokeStyle = PAPER;
   ctx.stroke(ring);
   ctx.lineWidth = 0.5 * u;
-  ctx.strokeStyle = INK;
+  ctx.strokeStyle = inkAlpha(0.7);
   ctx.stroke(ring);
   ctx.restore();
 }

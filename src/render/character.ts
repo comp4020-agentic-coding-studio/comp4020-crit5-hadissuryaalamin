@@ -289,7 +289,10 @@ export function drawCharacter(stage: Stage, spec: CharacterSpec): void {
       spec.feetY + h * 0.012,
       h * (0.2 + lift / h) * pose.scaleX,
       h * 0.052,
-      0.34 / (1 + (lift / h) * 3),
+      // Kept light: the human's foot ring is a coloured pool on the same
+      // ground, and a heavy contact shadow over it turned the one
+      // which-one-is-me affordance in the game grey.
+      0.22 / (1 + (lift / h) * 3),
     );
   }
 
@@ -807,10 +810,10 @@ export function drawFootRing(ctx: CanvasRenderingContext2D, spec: FootRingSpec):
   ctx.translate(cx, cy);
   ctx.scale(1, outerRy / outerRx);
   const pool = ctx.createRadialGradient(0, 0, 0, 0, 0, outerRx);
-  pool.addColorStop(0, shade(color, 0.3));
+  pool.addColorStop(0, shade(color, 0.34));
   pool.addColorStop(0.6, color);
-  pool.addColorStop(1, shade(color, -0.15));
-  ctx.globalAlpha = 0.44;
+  pool.addColorStop(1, shade(color, -0.1));
+  ctx.globalAlpha = 0.6;
   ctx.fillStyle = pool;
   ctx.beginPath();
   ctx.arc(0, 0, outerRx, 0, Math.PI * 2);
@@ -826,8 +829,8 @@ export function drawFootRing(ctx: CanvasRenderingContext2D, spec: FootRingSpec):
 
   const innerRim = new Path2D();
   innerRim.ellipse(cx, cy, innerRx, Math.max(0.5, innerRy), 0, 0, Math.PI * 2);
-  ctx.globalAlpha = 0.45;
-  definitionStroke(ctx, innerRim, weight * 0.6, shade(color, -0.4));
+  ctx.globalAlpha = 0.4;
+  definitionStroke(ctx, innerRim, weight * 0.6, shade(color, 0.1));
 
   ctx.restore();
 }

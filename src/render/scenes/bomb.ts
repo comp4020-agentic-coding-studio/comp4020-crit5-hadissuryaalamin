@@ -1,6 +1,15 @@
 import type { Stage } from "../canvas.ts";
 import { INK, PALETTES, PAPER } from "../canvas.ts";
-import { hardShadow, strokeWeight, wonkyStroke, wonkyStrokeColor } from "../draw.ts";
+import {
+  definitionStroke,
+  inkAlpha,
+  modelledSurface,
+  paperAlpha,
+  shade,
+  softShadow,
+  strokeWeight,
+  wonkyStroke,
+} from "../draw.ts";
 import {
   drawCharacter,
   drawFootRing,
@@ -141,10 +150,6 @@ export function drawBomb(
     // rather than inside it (the rig has no lean parameter of its own).
     const lean = holding ? panicShudder(state.elapsedMs, r, exploded) : leanAway(cx, bomb.x, exploded);
 
-    ctx.save();
-    ctx.translate(cx, feetY);
-    ctx.rotate((lean * Math.PI) / 180);
-    ctx.translate(-cx, -feetY);
     drawCharacter(stage, {
       seed: racer.character + 1,
       cx,
@@ -157,8 +162,21 @@ export function drawBomb(
       mouth: mouthFor(r, state, i, exploded),
       gaze: gazeAt(cx, feetY, bomb, s),
       pose: poseFor(r, state, i, exploded),
+      // The lean used to be a ctx.rotate wrapped around the rig, which tipped
+      // the character's own contact shadow off the floor with them. It is a
+      // rig parameter now, so the figure leans and its shadow does not.
+      lean,
+      // Secondary motion: the head lags the lean, the arms come up in front
+      // of whoever is nearest the bomb, and the holder's whole body vibrates
+      // on the rig's 60ms panic cycle.
+      headTilt: -lean * 0.45,
+      phase: (state.elapsedMs / PANIC_CYCLE_MS) * Math.PI * 2,
+      armSwing: holding && !exploded ? 0.35 : 0,
+      armLift: holding ? 0.72 : exploded ? 0.9 : 0.3,
+      armReach: holding ? 0.15 : -0.3,
+      bounce: holding && !exploded ? Math.abs(Math.sin(state.elapsedMs / PANIC_CYCLE_MS)) * 0.012 : 0,
+      follow: -lean * 0.05,
     });
-    ctx.restore();
   }
 
   if (exploded) return;
@@ -274,30 +292,42 @@ function drawTheBomb(
   const r = BOMB_R_U * u;
   const strokeOff = { dx: 0.3 * u, dy: 0.3 * u };
 
+  // A cast-iron sphere, not a hole in the background. The bomb has to stay
+  // near-black (it is a cartoon bomb), so the modelling does the work an ink
+  // outline used to: a radial fall-off from a lit crown, a rim light along
+  // the lower right where the ground bounces back, and one hard specular.
   const body = new Path2D();
   body.arc(cx, cy, r, 0, Math.PI * 2);
-  hardShadow(ctx, body, 0.9 * u, 1.1 * u);
-  ctx.fillStyle = INK;
+  softShadow(ctx, body, 1.4 * u, 1.8 * u, 3.4 * u, 0.42);
+  const iron = ctx.createRadialGradient(cx - r * 0.4, cy - r * 0.45, r * 0.05, cx, cy, r * 1.05);
+  iron.addColorStop(0, "rgb(112, 108, 104)");
+  iron.addColorStop(0.45, "rgb(46, 42, 40)");
+  iron.addColorStop(1, "rgb(12, 10, 9)");
+  ctx.fillStyle = iron;
   ctx.fill(body);
-  wonkyStrokeColor(ctx, body, strokeWeight(u, true), strokeOff, PAPER);
 
-  // A cream highlight crescent, so the sphere reads as round and not as a hole
-  // punched in the background.
+  const rim = new Path2D();
+  rim.arc(cx, cy, r * 0.94, Math.PI * 0.1, Math.PI * 0.72);
+  definitionStroke(ctx, rim, Math.max(1, u * 0.4), paperAlpha(0.34));
+  definitionStroke(ctx, body, Math.max(1, u * 0.34), paperAlpha(0.5));
+
   const shine = new Path2D();
-  shine.ellipse(cx - r * 0.34, cy - r * 0.38, r * 0.26, r * 0.16, -0.6, 0, Math.PI * 2);
-  ctx.fillStyle = PAPER;
-  ctx.globalAlpha = 0.75;
+  shine.ellipse(cx - r * 0.36, cy - r * 0.4, r * 0.24, r * 0.14, -0.6, 0, Math.PI * 2);
+  ctx.fillStyle = paperAlpha(0.85);
   ctx.fill(shine);
-  ctx.globalAlpha = 1;
 
   const capW = r * 0.62;
   const capH = r * 0.42;
   const capY = cy - r - capH * 0.55;
   const cap = new Path2D();
-  cap.rect(cx - capW / 2, capY, capW, capH);
-  ctx.fillStyle = INK;
+  cap.roundRect(cx - capW / 2, capY, capW, capH, capW * 0.14);
+  const brass = ctx.createLinearGradient(cx - capW / 2, 0, cx + capW / 2, 0);
+  brass.addColorStop(0, "rgb(88, 82, 74)");
+  brass.addColorStop(0.3, "rgb(176, 166, 148)");
+  brass.addColorStop(1, "rgb(70, 64, 58)");
+  ctx.fillStyle = brass;
   ctx.fill(cap);
-  wonkyStrokeColor(ctx, cap, strokeWeight(u * 0.7, false), strokeOff, PAPER);
+  definitionStroke(ctx, cap, Math.max(1, u * 0.3), inkAlpha(0.6));
 
   // The fuse leans out on the same side the bomb is held, so it never crosses
   // the holder's face.
@@ -319,7 +349,11 @@ function drawTheBomb(
     else cord.lineTo(x, y);
     tip = { x, y };
   }
-  wonkyStrokeColor(ctx, cord, strokeWeight(u * 0.8, false), strokeOff, PAPER);
+  // The cord: a dark core with a lit strand on its upper left, so it reads as
+  // twisted rope rather than as a drawn line.
+  definitionStroke(ctx, cord, Math.max(1.4, u * 0.95), inkAlpha(0.75));
+  definitionStroke(ctx, cord, Math.max(1, u * 0.55), "rgb(206, 186, 150)");
+  void strokeOff;
 
   drawSpark(ctx, tip.x, tip.y, u, state.elapsedMs, sparkColor, frac);
 }
@@ -388,11 +422,20 @@ function drawPassRing(
   ring.arc(0, 0, (BOMB_R_U + 2.6) * u, 0, Math.PI * 2);
   ctx.lineJoin = "round";
   ctx.lineCap = "round";
+  const halo = ctx.createRadialGradient(0, 0, (BOMB_R_U + 1) * u, 0, 0, (BOMB_R_U + 5) * u);
+  halo.addColorStop(0, shade(color, 0.1));
+  halo.addColorStop(1, inkAlpha(0));
+  ctx.globalAlpha = 0.45;
+  ctx.fillStyle = halo;
+  ctx.beginPath();
+  ctx.arc(0, 0, (BOMB_R_U + 5) * u, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalAlpha = 1;
   ctx.lineWidth = 1.5 * u;
   ctx.strokeStyle = color;
   ctx.stroke(ring);
   ctx.lineWidth = 0.4 * u;
-  ctx.strokeStyle = PAPER;
+  ctx.strokeStyle = paperAlpha(0.8);
   ctx.stroke(ring);
   ctx.restore();
 }
@@ -461,13 +504,30 @@ function drawExplosion(
 // floor line so the characters are standing somewhere rather than floating.
 function drawGround(stage: Stage, feetY: number, color: string, seed: number, u: number): void {
   const { ctx, width } = stage;
-  const line = new Path2D();
+  const y = feetY + 2.6 * u;
   const tilt = keyedRange(seed, "ground-tilt", 0.8 * u);
-  line.moveTo(0, feetY + 2.6 * u - tilt);
-  line.lineTo(width, feetY + 2.6 * u + tilt);
+
+  // The floor the three of them stand on, as a lit strip receding into
+  // shadow rather than one flat bar of colour.
+  const floor = ctx.createLinearGradient(0, y - 3 * u, 0, y + 14 * u);
+  floor.addColorStop(0, inkAlpha(0));
+  floor.addColorStop(0.3, inkAlpha(0.2));
+  floor.addColorStop(1, inkAlpha(0));
+  ctx.fillStyle = floor;
+  ctx.fillRect(0, y - 3 * u, width, 17 * u);
+
+  const line = new Path2D();
+  line.moveTo(0, y - tilt);
+  line.lineTo(width, y + tilt);
+  const edge = ctx.createLinearGradient(0, 0, width, 0);
+  edge.addColorStop(0, shade(color, -0.3));
+  edge.addColorStop(0.34, shade(color, 0.2));
+  edge.addColorStop(1, shade(color, -0.35));
+  ctx.save();
   ctx.lineJoin = "round";
   ctx.lineCap = "round";
   ctx.lineWidth = 1.4 * u;
-  ctx.strokeStyle = color;
+  ctx.strokeStyle = edge;
   ctx.stroke(line);
+  ctx.restore();
 }
