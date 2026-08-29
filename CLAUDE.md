@@ -123,13 +123,35 @@ name.
 
 ### Rig strokes must scale from the scene's own unit
 
-Four separate tasks have now independently re-derived this. `strokeWeight` has
-a 4px floor and a 1.2x multiplier sized for the stage unit `u`, and limb blobs
-are `2.2 * u`. Any scene drawing characters at a smaller unit than the stage —
-a transition card, a phone viewport, a cast of three side by side — gets the
-stroke clamped to 16px, which fills the blob solid: characters render as black
-flowers or near-solid ink. The fix each time was the same, a scene-local unit
-plus `fittedBlobScale`.
+Four separate tasks independently re-derived this before it was fixed properly.
+`strokeWeight` had a 4px floor and a 1.2x multiplier sized for the stage unit
+`u`, while limb blobs were `2.2 * u`. Any scene drawing characters at a smaller
+unit than the stage — a transition card, a phone viewport, a cast of three side
+by side — got the stroke clamped, which filled the blob solid: characters
+rendered as black flowers or near-solid ink. Each task patched it locally, and
+the fifth found the whole cast still reading ~80% black at desktop size.
 
-It is the single most repeated defect of the week, it is invisible to every
-automated check, and it only ever showed up in a screenshot at 390x844.
+**Resolved at the root, not patched again** (task 021): every mark is now sized
+from the figure's own height, and a shape's definition stroke is a darkened
+version of its own fill rather than ink. The `blobScale` / `fittedBlobScale`
+opt-ins that earlier tasks added are deleted — don't reach for them, they are
+gone. What carries forward is the rule: **a mark's weight belongs to the thing
+it draws, not to the stage it sits on.**
+
+The wider lesson is about patching. Four tasks each fixed their own scene and
+each was right locally; nobody fixed the rig, so the defect kept its shape and
+kept coming back. When the same failure is re-derived a third time, stop
+patching the caller.
+
+### The blank page that passed every check
+
+`shade()` was given its own output to re-darken — `shade(shade(colour, -0.22),
+-0.55)` — and its hex parser read the `"rg"` of `rgb(...)` as hex digits,
+producing `rgb(NaN, 82, 85)`. `addColorStop` threw on the first frame. The page
+was blank, and typecheck, build and all 75 tests were green over it.
+
+This is the sharp end of "a green check does not mean the code runs": the
+dead-code sensor cannot help, because the function *was* called — it threw. A
+Playwright `pageerror`/`console` listener found it in seconds. **Any script that
+drives the running game should assert zero page errors**, not just take a
+screenshot; a screenshot of a blank page looks like a screenshot.
