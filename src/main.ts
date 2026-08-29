@@ -61,7 +61,7 @@ import {
 } from "./game/pattern.ts";
 import { BOMB_LAPS, CAN_LAPS, CLIMBER_LAPS, PATTERN_LAPS } from "./game/laps.ts";
 import { mulberry32, type Rng } from "./game/rng.ts";
-import type { Place, Placing } from "./game/types.ts";
+import type { Place, Placing, RacerId } from "./game/types.ts";
 import { drawAttract, type AttractState } from "./render/scenes/attract.ts";
 import { drawTransition, TRANSITION_DURATION_MS, TRANSITION_STING_MS } from "./render/scenes/transition.ts";
 import { drawDeadFurniture, drawWinBurst, WIN_BURST_MS } from "./render/scenes/dead.ts";
@@ -278,6 +278,13 @@ function beginTransition(): void {
   transitionStingFired = false;
 }
 
+// The racers a CPU still drives. Racer 0 is always human; racer 1 stops being
+// driven the instant a second human takes that seat, or the CPU would go on
+// playing the round on top of them.
+function cpuRacers(): (1 | 2)[] {
+  return ([1, 2] as const).filter((r) => !gauntlet.racers[r].isHuman);
+}
+
 function handleTap(): void {
   ensureAudioContext(synth);
 
@@ -302,15 +309,37 @@ function handleTap(): void {
   // "round" phase forwards input into game logic (epic section 8).
 }
 
-function handlePad(padIndex: 0 | 1 | 2 | 3): void {
+// The desktop-only second human (epic sections 3 and 4): racer 1 stops being
+// CPU the instant a 1-4 key is first pressed. Discovered, never advertised —
+// nothing on screen says the seat is there. The run's own elimination and pips
+// still track racer 0 specifically, per epic section 6.
+function secondPlayerJoins(): void {
+  if (gauntlet.racers[1].isHuman) return;
+  const racers = gauntlet.racers.slice();
+  racers[1] = { ...racers[1], isHuman: true };
+  gauntlet = { ...gauntlet, racers };
+}
+
+// Which racer owns a given pad press. Player slot 1 only ever reaches here
+// after secondPlayerJoins() has run, so a stray digit key before that cannot
+// hand a round to a racer the CPU is still driving.
+function racerForPlayer(player: 0 | 1): RacerId {
+  return player === 1 && gauntlet.racers[1].isHuman ? 1 : 0;
+}
+
+function handlePad(player: 0 | 1, padIndex: 0 | 1 | 2 | 3): void {
   ensureAudioContext(synth);
-  padPressState = pressPad(padPressState, padIndex);
+  // The pad band is player 1's readout. A second human on the keyboard gets no
+  // band of their own — there is one set of four pads on screen and two people
+  // reaching for it, which is the arcade cabinet this borrows from.
+  if (player === 0) padPressState = pressPad(padPressState, padIndex);
 
   if (gauntlet.phase !== "round") return;
+  const racerId = racerForPlayer(player);
 
   if (currentRound(gauntlet) === "shake") {
     if (canState.status !== "playing") return;
-    canState = tapCan(canState, 0, padIndex, CAN_LAPS[gauntlet.lap]);
+    canState = tapCan(canState, racerId, padIndex, CAN_LAPS[gauntlet.lap]);
     // Pitched by pad, so alternating across the four pads (which is what
     // earns altGain) sounds different from hammering one (sameGain). The rule
     // is in the sound; nothing anywhere states it.
@@ -320,13 +349,13 @@ function handlePad(padIndex: 0 | 1 | 2 | 3): void {
 
   if (currentRound(gauntlet) === "climber") {
     if (climberState.status !== "playing") return;
-    const before = climberState.racers[0];
+    const before = climberState.racers[racerId];
     // A tap the rule module will ignore anyway (already on the roof, or still
     // stunned) gets no sound either - silence IS the readout that the stun is
     // still running.
     if (before.finishOrder !== null || before.stunRemaining > 0) return;
     const correct = padIndex === before.expectedPad;
-    climberState = tapClimber(climberState, 0, padIndex, CLIMBER_LAPS[gauntlet.lap], climberRng);
+    climberState = tapClimber(climberState, racerId, padIndex, CLIMBER_LAPS[gauntlet.lap], climberRng);
     if (correct) playClimbStep(synth, padIndex);
     else playSlip(synth);
     return;
@@ -337,8 +366,8 @@ function handlePad(padIndex: 0 | 1 | 2 | 3): void {
     // A tap from someone who is not holding the bomb, or who is still frozen
     // after a fumble, is silent as well as inert - the silence IS the readout
     // that it is not your problem yet (or not yet again).
-    if (bombState.holder !== 0 || bombState.racers[0].stunRemaining > 0) return;
-    bombState = tapBomb(bombState, 0, padIndex, BOMB_LAPS[gauntlet.lap]);
+    if (bombState.holder !== racerId || bombState.racers[racerId].stunRemaining > 0) return;
+    bombState = tapBomb(bombState, racerId, padIndex, BOMB_LAPS[gauntlet.lap]);
     if (padIndex === PASS_PAD) playBombPass(synth);
     else playFumble(synth);
     return;
@@ -349,9 +378,9 @@ function handlePad(padIndex: 0 | 1 | 2 | 3): void {
     // A pad hit while the game master is still sounding the pattern is inert
     // AND silent: waiting is part of the rule, and being answered with nothing
     // is how that gets learned. It is never an elimination.
-    const owed = expectedPad(patternState, 0);
+    const owed = expectedPad(patternState, racerId);
     if (owed === null) return;
-    patternState = tapPattern(patternState, 0, padIndex);
+    patternState = tapPattern(patternState, racerId, padIndex);
     // Only the correct echo is sounded here. A wrong pad is an ELIMINATION in
     // this round, not a stumble, and it gets the slump - fired from the frame
     // loop off `eliminationOrder`, so a rival dropping out sounds exactly the
@@ -360,17 +389,18 @@ function handlePad(padIndex: 0 | 1 | 2 | 3): void {
     return;
   }
 
-  if (throwawayFinishOrder[0] !== null) return;
-  throwawayTaps[0]++;
+  if (throwawayFinishOrder[racerId] !== null) return;
+  throwawayTaps[racerId]++;
   playTapBlip(synth);
-  if (throwawayTaps[0] >= THROWAWAY_TARGET_TAPS) {
-    throwawayFinishOrder[0] = throwawayFinishedCount++;
+  if (throwawayTaps[racerId] >= THROWAWAY_TARGET_TAPS) {
+    throwawayFinishOrder[racerId] = throwawayFinishedCount++;
   }
 }
 
 attachInput(canvas, {
   onTap: handleTap,
-  onPad: (_player, padIndex) => handlePad(padIndex),
+  onPad: (player, padIndex) => handlePad(player, padIndex),
+  onSecondPlayerJoin: secondPlayerJoins,
 });
 
 window.addEventListener("resize", () => resizeStage(stage));
@@ -465,7 +495,7 @@ function frame(now: number): void {
   if (gauntlet.phase === "round" && currentRound(gauntlet) === "shake") {
     const config = CAN_LAPS[gauntlet.lap];
     const cpuConfig = CPU_LAPS[gauntlet.lap];
-    for (const racerId of [1, 2] as const) {
+    for (const racerId of cpuRacers()) {
       const tick = tickCpuTimer(canCpuTimers[racerId - 1], cpuConfig, dtMs, canCpuRng);
       canCpuTimers[racerId - 1] = tick.timer;
       if (tick.acted && !tick.errored) {
@@ -492,7 +522,7 @@ function frame(now: number): void {
   } else if (gauntlet.phase === "round" && currentRound(gauntlet) === "climber") {
     const config = CLIMBER_LAPS[gauntlet.lap];
     const cpuConfig = CPU_LAPS[gauntlet.lap];
-    for (const racerId of [1, 2] as const) {
+    for (const racerId of cpuRacers()) {
       const tick = tickCpuTimer(climberCpuTimers[racerId - 1], cpuConfig, dtMs, climberCpuRng);
       climberCpuTimers[racerId - 1] = tick.timer;
       if (!tick.acted) continue;
@@ -523,7 +553,11 @@ function frame(now: number): void {
     // they get rid of it. A stunned rival's clock stops too, which is what
     // makes their fumble visibly cost them the same tempo it costs a human.
     const holder = bombState.holder;
-    if (bombState.status === "playing" && holder !== 0 && bombState.racers[holder].stunRemaining <= 0) {
+    if (
+      bombState.status === "playing" &&
+      !gauntlet.racers[holder].isHuman &&
+      bombState.racers[holder].stunRemaining <= 0
+    ) {
       const tick = tickCpuTimer(bombCpuTimers[holder - 1], cpuConfig, dtMs, bombCpuRng);
       bombCpuTimers[holder - 1] = tick.timer;
       const holderFumbles = bombState.racers[holder].fumbles;
@@ -577,7 +611,7 @@ function frame(now: number): void {
     // reaction clock runs - the same shape Oh No uses for whoever is holding
     // the bomb. A rival's clock starts when the cymbals come down and stops
     // the moment they finish echoing.
-    for (const racerId of [1, 2] as const) {
+    for (const racerId of cpuRacers()) {
       const owed = expectedPad(patternState, racerId);
       if (owed === null) continue;
       const tick = tickCpuTimer(patternCpuTimers[racerId - 1], cpuConfig, dtMs, patternCpuRng);
@@ -628,7 +662,7 @@ function frame(now: number): void {
   } else if (gauntlet.phase === "round") {
     throwawayElapsedMs += dtMs;
     const cpuConfig = CPU_LAPS[gauntlet.lap];
-    for (const racerId of [1, 2] as const) {
+    for (const racerId of cpuRacers()) {
       if (throwawayFinishOrder[racerId] !== null) continue;
       const tick = tickCpuTimer(throwawayCpuTimers[racerId - 1], cpuConfig, dtMs, throwawayRng);
       throwawayCpuTimers[racerId - 1] = tick.timer;
@@ -730,7 +764,6 @@ function frame(now: number): void {
   }
 
   padPressState = tickPadPress(padPressState, dtMs);
-
 
   requestAnimationFrame(frame);
 }

@@ -4,6 +4,7 @@ import { hardShadow, strokeWeight, wonkyStroke } from "../draw.ts";
 import {
   drawCharacter,
   drawFootRing,
+  fittedBlobScale,
   neutralPose,
   squashPose,
   stretchPose,
@@ -105,6 +106,12 @@ export function drawClimber(
       // roll (epic 8.3: every character reacts to what just happened).
       gaze: r.stunRemaining > 0 ? { x: 0, y: 1 } : { x: 0, y: -0.8 },
       pose: poseFor(r, state.elapsedMs, finished),
+      // Same defect Shake had, same one-line fix. The rig sizes the blob at
+      // the end of each limb off the STAGE unit, which at CHAR_HEIGHT_U puts
+      // six discs around the figure each about as wide as its own body.
+      // fittedBlobScale (task 017) is what that constant exists for; this
+      // scene predates it.
+      blobScale: fittedBlobScale(CHAR_HEIGHT_U),
     });
 
     // The glow tells the truth (epic 7.2), per racer: a ring above each

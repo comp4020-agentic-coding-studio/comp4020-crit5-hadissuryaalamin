@@ -1,8 +1,9 @@
 import type { Stage } from "../canvas.ts";
 import { gauge, hardShadow, strokeWeight, wonkyStroke } from "../draw.ts";
-import { drawCharacter, neutralPose, squashPose } from "../character.ts";
+import { drawCharacter, drawFootRing, fittedBlobScale, neutralPose, squashPose } from "../character.ts";
 import type { CanConfig, CanState } from "../../game/can.ts";
 import type { Racer } from "../../game/types.ts";
+import { PAD_BAND_FRACTION } from "../pads.ts";
 
 // Shake the Can to Outer Space (epic v2 section 7.1). Three characters in a
 // row, each hugging an oversized can, with a height scale behind each one
@@ -31,6 +32,23 @@ export const CAN_LAUNCH_HOLD_MS = 700;
 // shook barely lifts, so the three heights ARE the finishing order, read off
 // the screen a beat before the podium says the same thing.
 const LAUNCH_RISE_U = 26;
+
+// This scene draws in its own unit sized to the play area, the same correction
+// Oh No and Rhythm each needed. Screenshots at both viewports caught why it
+// needed one too: at the raw stage unit the cast stood 20 stage-units tall
+// against Oh No's effective ~34, and the rig scales its outline weight AND its
+// hand/foot blobs off the stage unit — so the three racers came out as black
+// flowers of six discs with a sliver of colour, worst at 390x844, in the first
+// round of the first lap. Every check was green over it.
+const CHAR_HEIGHT_U = 20;
+// Widest thing a seat holds: a racer with arms out, hugging their can.
+const SEAT_FOOTPRINT_U = 22;
+// Share of the play area the cast may take vertically, leaving the gauges the
+// rest — the gauges are the readout, but they were taking 58% of the screen
+// for a bar that is empty at the start of every round.
+const CAST_HEIGHT_FRACTION = 0.32;
+const MAX_SCENE_SCALE = 1.7;
+const GAUGE_TOP_FRACTION = 0.06;
 // Cosmetic normalisation only — not a gameplay cap (CanState.shake itself is
 // unbounded). Roughly the shake a racer can reach shaking flat-out for a
 // whole round; tune alongside the laps.ts numbers in the task 019 pass.
@@ -46,24 +64,46 @@ export function drawCan(
   racers: readonly Racer[],
   launchMs = 0,
 ): void {
-  const { width, height, u } = stage;
+  const { ctx, width, height, u } = stage;
   const spacing = width / 4;
+  const playBottom = height * (1 - PAD_BAND_FRACTION);
+  const s = Math.min(
+    (width * 0.25) / SEAT_FOOTPRINT_U,
+    (playBottom * CAST_HEIGHT_FRACTION) / CHAR_HEIGHT_U,
+    u * MAX_SCENE_SCALE,
+  );
+  // Enough ground margin that the human's foot ring clears the pad band —
+  // at 3s it was drawn straight under it and lost its bottom edge.
+  const feetY = playBottom - 7 * s;
+  const gaugeTop = height * GAUGE_TOP_FRACTION;
+  const gaugeHeight = Math.max(0, feetY - CHAR_HEIGHT_U * s - 3 * s - gaugeTop);
   const launchT = state.status === "resolved" ? Math.min(1, launchMs / CAN_LAUNCH_HOLD_MS) : 0;
 
   for (let i = 0; i < 3; i++) {
     const racer = racers[i];
     const racerState = state.racers[i];
     const cx = spacing * (i + 1);
-    const feetY = height * 0.72;
 
-    drawHeightGauge(stage, cx, racerState.shake, racer.colour);
-    drawCanAndCharacter(stage, cx, feetY, racer, racerState, state.elapsedMs, launchT, u);
+    drawHeightGauge(stage, cx, racerState.shake, racer.colour, gaugeTop, gaugeHeight, s);
+    // Epic 8.2's ring, so the human knows which of three identical figures is
+    // theirs. Shake was the ONE round without it, and it is round 1 of lap 1 —
+    // the first time a stranger ever sees the three of them side by side.
+    if (racer.isHuman) drawFootRing(ctx, { cx, feetY, u: s, color: racer.colour });
+    drawCanAndCharacter(stage, cx, feetY, racer, racerState, state.elapsedMs, launchT, s, u);
   }
 
   if (state.status === "resolved") {
     for (let i = 0; i < 3; i++) {
-      const cx = spacing * (i + 1);
-      drawSprayBurst(stage, cx, height * 0.72, state.racers[i].shake, racers[i].colour, launchT);
+      drawSprayBurst(
+        stage,
+        spacing * (i + 1),
+        state.racers[i].shake,
+        racers[i].colour,
+        launchT,
+        gaugeTop,
+        gaugeHeight,
+        s,
+      );
     }
   }
 
@@ -76,13 +116,18 @@ function launchEase(t: number): number {
   return 1 - (1 - t) * (1 - t);
 }
 
-function drawHeightGauge(stage: Stage, cx: number, shake: number, color: string): void {
-  const { ctx, height, u } = stage;
-  const gaugeWidth = 6 * u;
-  const gaugeTop = height * 0.1;
-  const gaugeHeight = height * 0.58;
+function drawHeightGauge(
+  stage: Stage,
+  cx: number,
+  shake: number,
+  color: string,
+  gaugeTop: number,
+  gaugeHeight: number,
+  s: number,
+): void {
+  const gaugeWidth = 6 * s;
   const fillFrac = Math.max(0, Math.min(1, shake / DISPLAY_REFERENCE_SHAKE));
-  gauge(ctx, cx - gaugeWidth / 2, gaugeTop, gaugeWidth, gaugeHeight, fillFrac, color);
+  gauge(stage.ctx, cx - gaugeWidth / 2, gaugeTop, gaugeWidth, gaugeHeight, fillFrac, color);
 }
 
 function drawCanAndCharacter(
@@ -93,33 +138,47 @@ function drawCanAndCharacter(
   racerState: CanState["racers"][number],
   elapsedMs: number,
   launchT: number,
+  s: number,
   stageU: number,
 ): void {
-  const { ctx, u } = stage;
-  const canHeight = 20 * u;
+  const { ctx } = stage;
+  const u = s;
+  // Under half the racer's height, and drawn IN FRONT of them rather than
+  // behind. Behind and at full height — which is how this scene shipped — the
+  // can was exactly the silhouette of the character standing over it, so the
+  // two merged into one black slab and the round's whole prop was invisible.
+  // In front and smaller, the racer is visibly HUGGING it, which is what epic
+  // 7.1 asks for.
+  const canHeight = 11 * s;
 
   const sinceHitMs = racerState.lastHitAtMs === null ? Infinity : elapsedMs - racerState.lastHitAtMs;
   const joltT = Math.max(0, 1 - sinceHitMs / JOLT_MS);
   const shakeFrac = Math.max(0, Math.min(1, racerState.shake / DISPLAY_REFERENCE_SHAKE));
   const rise = launchEase(launchT) * shakeFrac * LAUNCH_RISE_U * stageU;
 
-  ctx.save();
-  ctx.translate(cx, feetY - canHeight * 0.45 - rise);
-  drawCanBody(ctx, canHeight, racer.colour, u, joltT);
-  ctx.restore();
-
   drawCharacter(stage, {
     seed: racer.character + 1,
     cx,
     feetY,
-    // Once the cans are gone the racers stop straining and look up after them.
-    heightU: 20,
+    // heightU is in STAGE units, so convert: this cast stands CHAR_HEIGHT_U
+    // scene-units tall. Once the cans are gone the racers stop straining and
+    // look up after them.
+    heightU: (CHAR_HEIGHT_U * s) / stageU,
     color: racer.colour,
     eye: launchT > 0 ? "wide" : "squeezed",
     mouth: launchT > 0 ? "howl" : "gritted",
     gaze: launchT > 0 ? { x: 0, y: -0.9 } : undefined,
     pose: squashPose(joltT * 0.5),
+    // Without this the rig's stage-unit hands and feet come out as six discs
+    // each about as wide as the figure's own body — the defect task 017 added
+    // fittedBlobScale for, never applied here because this scene predates it.
+    blobScale: fittedBlobScale((CHAR_HEIGHT_U * s) / stageU),
   });
+
+  ctx.save();
+  ctx.translate(cx, feetY - CHAR_HEIGHT_U * 0.42 * s - rise);
+  drawCanBody(ctx, canHeight, racer.colour, u, joltT);
+  ctx.restore();
 }
 
 function drawCanBody(
@@ -162,14 +221,14 @@ function drawCanBody(
 function drawSprayBurst(
   stage: Stage,
   cx: number,
-  feetY: number,
   shake: number,
   color: string,
   launchT: number,
+  gaugeTop: number,
+  gaugeHeight: number,
+  u: number,
 ): void {
-  const { ctx, height, u } = stage;
-  const gaugeTop = height * 0.1;
-  const gaugeHeight = height * 0.58;
+  const { ctx } = stage;
   const fillFrac = Math.max(0, Math.min(1, shake / DISPLAY_REFERENCE_SHAKE));
   const sprayY = gaugeTop + gaugeHeight * (1 - fillFrac);
   const t = launchEase(launchT);
@@ -187,5 +246,4 @@ function drawSprayBurst(
     ctx.fill(path);
     wonkyStroke(ctx, path, strokeWeight(u, false), { dx: 0.15 * u, dy: 0.15 * u });
   }
-  void feetY;
 }
