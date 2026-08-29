@@ -105,10 +105,34 @@ export const CLIMBER_LAPS: Record<Lap, ClimberConfig> = {
 // fastest way to break the muted-legibility requirement, so it shrinks more
 // slowly than the interval it sits inside.
 //
-// roundTimeoutSeconds is a safety valve, not a clock the player races. At
-// lap 1 a pattern costs about (n * 0.62 + 1.3)s of demo plus about n * 0.6s
-// of echo at a rival's reaction speed, so three patterns run to roughly 15s;
-// 30s is about double the expected round and only bites when someone stalls.
+// roundTimeoutSeconds is a safety valve, not a clock the player races.
+//
+// RETUNED IN PLAY (task 019), from 30 / 32 / 34. The derivation those numbers
+// came from is the paragraph this one replaces, and it was wrong in two ways
+// at once: it measured the echo at "a rival's reaction speed", which leaves
+// out the pause a human needs to RECALL the pattern before playing any of it,
+// and it assumed a round runs three patterns when four is common. Played at a
+// human echo cadence the valve did not sit at double the expected round; it
+// sat just under it, and fired.
+//
+// What playing it showed, 24 rounds, 8 per lap, a competent player making no
+// mistakes at all: the longest legitimate round was 30.9s at lap 1 against a
+// 30s valve, 32.9s at lap 2 against 32s, and 34.9s at lap 3 against 34s. One
+// round in eight AT EVERY LAP ran out of clock with two racers still standing
+// and neither of them having made a mistake, and was decided by the
+// bestLength tiebreak instead of by the elimination rule the whole microgame
+// is built on.
+//
+// So the valve is now sized against measured play rather than against a
+// derivation: the four-pattern rounds above, plus room for the fifth pattern
+// that a still luckier round would reach (about 9.5s more at lap 1, 9.7 at
+// lap 2, 9.8 at lap 3).
+//
+// Raising it costs nothing, and only because epic 7.4's amendment landed
+// first. The valve used to be the only thing that ended a round where nobody
+// played; echoSeconds now ends one in a single demo plus one deadline, about
+// 7.7s at lap 1. Capping the dead screen is no longer this number's job, so it
+// is free to be long enough never to interrupt a round that is being played.
 //
 // echoSeconds is the epic 7.4 AMENDMENT's deadline, and it is deliberately
 // NOT a timing dial. A racer echoing a pattern leaves gaps of roughly 0.4-0.7s
@@ -129,7 +153,7 @@ export const PATTERN_LAPS: Record<Lap, PatternConfig> = {
     demoHitSeconds: 0.62,
     demoLitSeconds: 0.34,
     demoHoldSeconds: 0.6,
-    roundTimeoutSeconds: 30,
+    roundTimeoutSeconds: 45,
     echoSeconds: 4.5,
   },
   2: {
@@ -141,7 +165,7 @@ export const PATTERN_LAPS: Record<Lap, PatternConfig> = {
     demoHitSeconds: 0.52,
     demoLitSeconds: 0.29,
     demoHoldSeconds: 0.5,
-    roundTimeoutSeconds: 32,
+    roundTimeoutSeconds: 48,
     echoSeconds: 4.0,
   },
   3: {
@@ -153,7 +177,7 @@ export const PATTERN_LAPS: Record<Lap, PatternConfig> = {
     demoHitSeconds: 0.44,
     demoLitSeconds: 0.25,
     demoHoldSeconds: 0.42,
-    roundTimeoutSeconds: 34,
+    roundTimeoutSeconds: 50,
     echoSeconds: 3.5,
   },
 };
